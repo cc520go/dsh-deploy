@@ -190,6 +190,10 @@ tools/smoke-remote.sh   验收清单
 tests/run_tests.sh      测试套件（沙箱内跑，不碰真机）
 ```
 
+## 待办与交接
+
+见 [`docs/TODO.md`](docs/TODO.md)：待办事项、新机器上线的步骤、已知限制。
+
 ## 开发
 
 ```bash
