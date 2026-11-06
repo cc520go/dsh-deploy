@@ -95,6 +95,18 @@ DSH status | version | check-update | backup | diag | logs | share
 
 ---
 
+## 自建镜像（国内推荐）
+
+GitHub 在国内经常连不上，可以在自己的机器上放一份静态镜像：
+
+```bash
+curl -fsSL http://<你的地址>/lisa-install.sh -o /tmp/lisa-install.sh
+sha256sum /tmp/lisa-install.sh
+bash /tmp/lisa-install.sh --auto --with-hy2
+```
+
+部署方法见 `tools/mirror/README.md`（nginx，只提供 GET/HEAD，不含任何凭据）。
+
 ## 客户端怎么连
 
 1. 服务器上 `DSH` → `15 查看链接`，复制 `hysteria2://…`；`8 通用链接` 给出 `vless://…`。

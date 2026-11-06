@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DSH 部署 · 下载</title>
+<style>
+  body{font:16px/1.7 -apple-system,"PingFang SC","Noto Sans SC",sans-serif;max-width:720px;margin:2rem auto;padding:0 1rem;color:#1c2526;background:#f7f9f9}
+  h1{font-size:1.4rem}
+  code,pre{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.9rem}
+  pre{background:#0f172a;color:#e2e8f0;padding:.9rem 1rem;border-radius:10px;overflow-x:auto}
+  a{color:#0b7a75}
+  .muted{color:#5b6b6b;font-size:.9rem}
+</style>
+</head>
+<body>
+<h1>DSH 一键部署 · 下载</h1>
+<p class="muted">Debian 12：VLESS + Reality 主线，可选 Hysteria2 附加协议。</p>
+
+<h2>一条命令安装</h2>
+<pre>curl -fsSL http://64.205.110.102/lisa-install.sh -o /tmp/lisa-install.sh \
+  &amp;&amp; sha256sum /tmp/lisa-install.sh \
+  &amp;&amp; bash /tmp/lisa-install.sh --auto --with-hy2</pre>
+<p class="muted">先对比 <a href="SHA256SUMS">SHA256SUMS</a> 里的值再执行；校验不通过就不要跑。</p>
+
+<h2>文件</h2>
+<ul>
+  <li><a href="lisa-install.sh">lisa-install.sh</a> —— 当前版本的单文件安装器（自校验）</li>
+  <li><a href="lisa-install-26.10.21.sh">lisa-install-26.10.21.sh</a> —— 固定版本</li>
+  <li><a href="lisa-26.10.21.tar.gz">lisa-26.10.21.tar.gz</a> —— 完整源码包</li>
+  <li><a href="smoke-remote.sh">smoke-remote.sh</a> —— 装完的自检清单</li>
+  <li><a href="SHA256SUMS">SHA256SUMS</a></li>
+</ul>
+
+<h2>装完以后</h2>
+<pre>bash smoke-remote.sh          # 一条命令给出 PASS/FAIL 结论
+DSH                           # 打开菜单（旧命令 lisa 仍可用）</pre>
+<p class="muted">源码仓库：<a href="https://github.com/cc520go/dsh-deploy">github.com/cc520go/dsh-deploy</a></p>
+</body>
+</html>
