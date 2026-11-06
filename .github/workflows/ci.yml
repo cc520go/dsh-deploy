@@ -41,7 +41,24 @@ jobs:
           shellcheck -S error install.sh manage.sh diagnose.sh lib/*.sh tools/*.sh
 
       - name: 测试套件
-        run: bash tests/run_tests.sh
+        # 失败时把失败的用例名写进 commit status：这样不用登录也能
+        # 从 /commits/<sha>/status 里看到具体哪几条挂了（日志要权限）。
+        run: |
+          set +e
+          bash tests/run_tests.sh 2>&1 | tee /tmp/tests.log
+          rc=${PIPESTATUS[0]}
+          if [[ "${rc}" -ne 0 ]]; then
+            fails="$(grep -E '^(FAIL|Tests:)' /tmp/tests.log | tr '\n' ' ' | cut -c1-120)"
+            echo "失败用例：${fails}"
+            if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+              curl -s -o /dev/null -X POST \
+                -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                -H "Accept: application/vnd.github+json" \
+                -d "{\"state\":\"failure\",\"context\":\"tests\",\"description\":\"${fails}\"}" \
+                "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" || true
+            fi
+            exit 1
+          fi
 
       - name: 打包（单文件安装器 + 校验和）
         run: bash tools/build-release.sh
