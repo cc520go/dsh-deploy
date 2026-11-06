@@ -1,0 +1,54 @@
+name: CI
+
+# 目标：每次 push 都跑一遍"能不能装"的三道关 —— 语法、静态检查、测试套件。
+# 测试里有几项强绑 Debian 12（内核/系统检查），所以整条流水线跑在
+# debian:12 容器里，而不是 ubuntu runner，否则永远是红的、然后就没人看了。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Debian 12 测试与打包
+    runs-on: ubuntu-latest
+    container: debian:12
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装依赖
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            git ca-certificates curl shellcheck unzip iproute2 openssl
+
+      - name: 语法检查（bash -n）
+        run: |
+          set -e
+          for f in install.sh manage.sh diagnose.sh lib/*.sh tools/*.sh tests/run_tests.sh; do
+            bash -n "${f}"
+          done
+          echo "所有脚本语法通过"
+
+      - name: 静态检查（shellcheck，仅 error 级）
+        run: |
+          shellcheck -S error install.sh manage.sh diagnose.sh lib/*.sh tools/*.sh
+
+      - name: 测试套件
+        run: bash tests/run_tests.sh
+
+      - name: 打包（单文件安装器 + 校验和）
+        run: bash tools/build-release.sh
+
+      - name: 上传发布物
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 14
