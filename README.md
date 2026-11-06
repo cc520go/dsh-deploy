@@ -14,25 +14,28 @@ Reality 走 TCP 适合下载和大流量，Hysteria2 走 UDP 适合语音、视�
 
 服务器：Debian 12，root 权限。
 
-**方式一：在线（服务器能访问 GitHub）**
+**方式一：国内镜像（推荐，不依赖 GitHub）**
 
 ```bash
-git clone https://github.com/cc520go/xray-reality-manager.git /tmp/lisa && cd /tmp/lisa && bash install.sh --auto --with-hy2
+curl -fsSL http://64.205.110.102/lisa-install.sh -o /tmp/lisa-install.sh
+sha256sum /tmp/lisa-install.sh          # 对比 SHA256SUMS
+bash /tmp/lisa-install.sh --auto --with-hy2
 ```
 
-**方式二：离线单文件（推荐，不依赖 GitHub）**
-
-把 `lisa-install-<版本>.sh` 用 WinSCP / scp / 面板文件管理器上传到服务器，然后：
+**方式二：从源码安装（服务器能访问 GitHub）**
 
 ```bash
-sha256sum lisa-install-26.10.21.sh        # 与发布页的 SHA256SUMS 对比
+git clone https://github.com/cc520go/dsh-deploy.git /tmp/dsh && cd /tmp/dsh && bash install.sh --auto --with-hy2
+```
+
+**方式三：离线单文件（完全离线）**
+
+把 `lisa-install-<版本>.sh`（Release 附件或 `dist/`）用 WinSCP / scp / 面板文件管理器上传，然后：
+
+```bash
+sha256sum lisa-install-26.10.21.sh      # 与 SHA256SUMS 对比
 bash lisa-install-26.10.21.sh --auto --with-hy2
 ```
-
-- 不加 `--with-hy2` 就只装 Reality；交互模式下脚本会问一句要不要加 HY2。
-- 装完输入 **`DSH`** 打开菜单（旧命令 `lisa` 仍然可用）。
-- 全新重置的系统上，脚本会先等云初始化（cloud-init）和 dpkg 锁释放，最多各等 180 / 300 秒，
-  不需要你掐着表重试。
 
 常用的参数：
 
@@ -95,7 +98,7 @@ DSH status | version | check-update | backup | diag | logs | share
 
 ---
 
-## 自建镜像（国内推荐）
+## 自建镜像
 
 GitHub 在国内经常连不上，可以在自己的机器上放一份静态镜像：
 
