@@ -1,0 +1,33 @@
+# xray-reality-manager .gitignore
+# 原则：任何可能包含真实凭据、密钥或完整节点分享链接的文件一律不进仓库。
+
+# 私钥与证书
+*.key
+*.pem
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+
+# 密码与凭据
+.env
+.env.*
+*secret*
+*credential*
+*password*
+
+# 本地节点配置与备份（可能包含真实 UUID、密钥与分享链接）
+config.json
+node.json
+node.params
+*.params
+local-config/
+backups/
+*.backup
+*.bak
+
+# 日志（可能包含敏感信息与诊断细节）
+*.log
+
+# 快照目录（服务器上的算子备份，不进仓库）
+xray-backup-*/

@@ -1,0 +1,18 @@
+# xray-reality-manager log rotation (installed by install.sh, only if
+# logrotate exists; never installed automatically by the menu).
+# copytruncate is deliberate: xray keeps the log file open, so renaming
+# it would leave the service writing to a deleted inode. With
+# copytruncate the same file is truncated in place, so diagnose.sh and
+# `lisa logs` keep reading ${XRAY_LOG_DIR}/error.log after rotation.
+# No service restart is needed for rotation.
+# If your logrotate complains about directory ownership, add a line:
+#   su xray xray
+/var/log/xray/*.log {
+    daily
+    rotate 7
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}
