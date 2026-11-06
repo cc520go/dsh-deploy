@@ -21,7 +21,12 @@
 <pre>curl -fsSL http://64.205.110.102/lisa-install.sh -o /tmp/lisa-install.sh \
   &amp;&amp; sha256sum /tmp/lisa-install.sh \
   &amp;&amp; bash /tmp/lisa-install.sh --auto --with-hy2</pre>
-<p class="muted">先对比 <a href="SHA256SUMS">SHA256SUMS</a> 里的值再执行；校验不通过就不要跑。</p>
+<h2>先验签再看内容（推荐）</h2>
+<pre>curl -fsSLO http://64.205.110.102/{SHA256SUMS,SHA256SUMS.asc,dsh-signing-key.asc}
+gpg --import dsh-signing-key.asc          # 一次性
+gpg --verify SHA256SUMS.asc SHA256SUMS    # 必须是 Good signature
+sha256sum -c SHA256SUMS --ignore-missing  # 必须是 OK</pre>
+<p class="muted">任一失败就不要执行安装器。公钥指纹：<code>63AEB2BD09A2458B54D7AB1E7F938C08CA8E68D6</code></p>
 
 <h2>文件</h2>
 <ul>
@@ -29,7 +34,8 @@
   <li><a href="lisa-install-26.10.21.sh">lisa-install-26.10.21.sh</a> —— 固定版本</li>
   <li><a href="lisa-26.10.21.tar.gz">lisa-26.10.21.tar.gz</a> —— 完整源码包</li>
   <li><a href="smoke-remote.sh">smoke-remote.sh</a> —— 装完的自检清单</li>
-  <li><a href="SHA256SUMS">SHA256SUMS</a></li>
+  <li><a href="SHA256SUMS">SHA256SUMS</a> · <a href="SHA256SUMS.asc">SHA256SUMS.asc</a>（签名）</li>
+  <li><a href="dsh-signing-key.asc">dsh-signing-key.asc</a>（公钥）</li>
 </ul>
 
 <h2>装完以后</h2>

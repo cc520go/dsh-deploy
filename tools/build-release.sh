@@ -14,7 +14,7 @@
 # file with scp/WinSCP, run one command. Nothing is fetched to bootstrap.
 #
 # Usage:
-#   tools/build-release.sh [--with-tests] [version]
+#   tools/build-release.sh [--with-tests] [--no-sign] [version]
 #
 # The version defaults to the VERSION file's content.
 
@@ -27,6 +27,7 @@ WITH_TESTS=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --with-tests) WITH_TESTS=1; shift ;;
+        --no-sign) NO_SIGN=1; shift ;;
         -h|--help)
             sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
             exit 0
@@ -167,8 +168,31 @@ info "built $(basename "${SELF}") ($(du -h "${SELF}" | cut -f1))"
 (
     cd "${DIST}"
     sha256sum "$(basename "${TARBALL}")" "$(basename "${SELF}")" > SHA256SUMS
+    # 稳定别名 lisa-install.sh 与版本文件同内容，同一个哈希也写进去，
+    # 这样用户下别名文件也能用 sha256sum -c 校验（否则会“no file was verified”）。
+    alias_hash="$(sha256sum "$(basename "${SELF}")" | cut -d' ' -f1)"
+    printf '%s  %s\n' "${alias_hash}" "lisa-install.sh" >> SHA256SUMS
 )
 info "wrote dist/SHA256SUMS"
+
+# 分离签名：SHA256SUMS.asc 由仓库里的公钥可验。没有签名私钥就拒绝发布，
+# 除非显式 --no-sign（仅用于本地调试）。
+if [[ "${NO_SIGN:-0}" == "1" ]]; then
+    info "跳过签名（--no-sign）"
+else
+    if ! command -v gpg >/dev/null 2>&1; then
+        fail "gpg 不可用：发布必须签名。装 gnupg，或用 --no-sign 只做本地调试包。"
+    fi
+    if ! gpg --list-secret-keys release@dsh-deploy >/dev/null 2>&1; then
+        fail "找不到签名私钥（release@dsh-deploy）。导入密钥，或用 --no-sign 只做本地调试包。"
+    fi
+    gpg --batch --yes --armor --detach-sign \
+        -u release@dsh-deploy \
+        -o "${DIST}/SHA256SUMS.asc" "${DIST}/SHA256SUMS" \
+        || fail "签名失败"
+    cp "${REPO_ROOT}/docs/dsh-signing-key.asc" "${DIST}/dsh-signing-key.asc"
+    info "signed: dist/SHA256SUMS.asc"
+fi
 
 printf '\n发布物：\n'
 printf '  %s\n' "${TARBALL}"

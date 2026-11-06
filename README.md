@@ -37,6 +37,22 @@ sha256sum lisa-install-26.10.21.sh      # 与 SHA256SUMS 对比
 bash lisa-install-26.10.21.sh --auto --with-hy2
 ```
 
+### 验证发布物（推荐，30 秒）
+
+发布物用 GPG 分离签名，公钥在 `docs/dsh-signing-key.asc`（指纹
+`63AEB2BD09A2458B54D7AB1E7F938C08CA8E68D6`）。一次性导入公钥后，每次发布都能自动验：
+
+```bash
+# 一次性：导入公钥
+gpg --import dsh-signing-key.asc
+
+# 每次发布：验签 + 比对哈希（任一失败就不要执行）
+gpg --verify SHA256SUMS.asc SHA256SUMS && sha256sum -c SHA256SUMS --ignore-missing
+```
+
+验签通过说明发布物确实由本项目的私钥签出、且内容未被改动；篡改任何一个字节，
+`gpg --verify` 会直接报 `BAD signature`。
+
 常用的参数：
 
 | 参数 | 作用 |
