@@ -49,6 +49,7 @@ jobs:
 
       - name: 测试套件
         env:
+          SKIP_ENV_TESTS: "1"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         # 失败时把失败的用例名写进 commit status：这样不用登录也能
         # 从 /commits/<sha>/status 里看到具体哪几条挂了（日志要权限）。

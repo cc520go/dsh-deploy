@@ -1801,8 +1801,15 @@ run_test t_node_auto
 run_test t_node_sni
 run_test t_archive_xray
 run_test t_keypair_formats
+# 下面这几组需要一台真实的 Debian 12 + systemd（CI 容器里没有 systemd，
+# 也没有真正的 apt 行为）。默认照样跑，只有显式 SKIP_ENV_TESTS=1 才跳过，
+# 供 CI 使用；真实机器的验收靠 tools/smoke-remote.sh。
+if [[ "${SKIP_ENV_TESTS:-0}" == "1" ]]; then
+    printf 'SKIP: 环境类测试（需真实 Debian 12 + systemd）：t_env_check_debian12 t_install_completion t_logrotate_smart_install_apt_*\n'
+else
 run_test t_env_check_debian12
 run_test t_install_completion
+fi
 run_test t_service_display_state
 run_test t_install_repair
 run_test t_menu_install_upgrade
@@ -1842,8 +1849,10 @@ run_test t_snapshot_known_good_prune
 run_test t_diag_restore_offer
 run_test t_sni_precheck
 run_test t_logrotate_smart_install_present
+if [[ "${SKIP_ENV_TESTS:-0}" != "1" ]]; then
 run_test t_logrotate_smart_install_apt_success
 run_test t_logrotate_smart_install_apt_failure
+fi
 run_test t_logrotate_test_mode_no_real_apt
 run_test t_test_sandbox_isolation
 
