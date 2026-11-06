@@ -1,5 +1,7 @@
 # DSH 一键部署 · Reality + Hysteria2
 
+[![CI](https://github.com/cc520go/dsh-deploy/actions/workflows/ci.yml/badge.svg)](https://github.com/cc520go/dsh-deploy/actions/workflows/ci.yml)
+
 Debian 12 专用的一键部署脚本。主线是 **VLESS + Reality（TCP 443）**，另可加装
 **Hysteria2（UDP 443）** 作为第二个协议。两条协议、两个服务、两个端口，互不干扰：
 Reality 走 TCP 适合下载和大流量，Hysteria2 走 UDP 适合语音、视频通话这类实时流量。
