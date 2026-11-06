@@ -675,9 +675,10 @@ t_menu_smoke() {
     # HY2 add-on (v5): six items live in the same menu.
     printf '%s' "${out}" | grep -q "13 安装/升级" || return 1
     printf '%s' "${out}" | grep -q "18 轮换证书" || return 1
+    printf '%s' "${out}" | grep -q "19 一键体检" || return 1
     printf '%s' "${out}" | grep -q "回滚快照" || return 1
     printf '%s' "${out}" | grep -q "BBR 加速" || return 1
-    printf '%s' "${out}" | grep -q "请选择 \[0-18\]" || return 1
+    printf '%s' "${out}" | grep -q "请选择 \[0-19\]" || return 1
     # Menu 1 changed (2026-11-03, main-chat approved): 系统安全, not outbound test.
     printf '%s' "${out}" | grep -q "认证方式" || return 1
     printf '%s' "${out}" | grep -q "运维" || return 1
@@ -1215,7 +1216,7 @@ t_menu_install_upgrade() {
     grep -q "cmd_outbound_test" "${REPO_ROOT}/manage.sh" && return 1 || true
     grep -q "安装指定版本核心（未装时用）" "${REPO_ROOT}/manage.sh" && return 1 || true
     grep -q "4 升级核心" "${REPO_ROOT}/manage.sh" || return 1
-    grep -q "请选择 \[0-18\]" "${REPO_ROOT}/manage.sh" || return 1
+    grep -q "请选择 \[0-19\]" "${REPO_ROOT}/manage.sh" || return 1
     grep -q "通用链接" "${REPO_ROOT}/manage.sh" || return 1
     grep -q "13 安装/升级" "${REPO_ROOT}/manage.sh" || return 1
     grep -q "12 BBR" "${REPO_ROOT}/manage.sh" || return 1

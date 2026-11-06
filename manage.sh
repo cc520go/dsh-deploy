@@ -58,7 +58,7 @@ usage() {
     printf 'Commands: status, version, check-update, install [ver], upgrade [ver], downgrade [ver],\n'
     printf '          rollback [snapshot], backup, restore [snapshot], node <sub>,\n'
     printf '          share, diag [--loopback], logs, uninstall, bbr <sub>, auth,\n'
-    printf '          hy2 <install|uninstall|link|status|logs|rotate-cert|restore|snapshot>, menu, help\n'
+    printf '          hy2 <install|uninstall|link|status|logs|rotate-cert|restore|snapshot>, smoke, menu, help\n'
     printf 'auth = menu 1, 更改认证方式（关闭密码、开启密钥登录）\n'
     printf 'hy2 = Hysteria2 附加协议（菜单 13-18）。BBR subs: bbr3, version, status, clear (auto-fq is the internal one-shot boot target, not a menu item)\n'
     printf 'Node subs: show, init, share, sni, restore-main\n'
@@ -812,6 +812,16 @@ cmd_uninstall() {
 }
 
 # ------------------------------------------------------------ BBR cmds ----
+# cmd_smoke: 一条命令体检（调用随工具一起安装的 smoke-remote.sh）。
+cmd_smoke() {
+    local f="${SCRIPT_DIR}/smoke-remote.sh"
+    if [[ ! -f "${f}" ]]; then
+        die "体检脚本缺失：${f}（重跑一次安装器即可补上）"
+        return 1
+    fi
+    bash "${f}" "$@"
+}
+
 cmd_bbr() {
     local sub="${1:-}"
     shift || true
@@ -866,9 +876,10 @@ menu() {
         printf '  13 安装/升级    14 卸载\n'
         printf '  15 查看链接     16 状态/重启\n'
         printf '  17 日志         18 轮换证书\n'
+        printf '  19 一键体检\n'
         printf '  ────────────────────────────\n'
         printf '   0 退出\n'
-        printf '请选择 [0-18]: '
+        printf '请选择 [0-19]: '
         read -r choice || return 0
         case "${choice}" in
             1) cmd_auth ;;
@@ -898,6 +909,7 @@ menu() {
             16) hy2_cmd_status ;;
             17) hy2_cmd_logs ;;
             18) hy2_cmd_rotate_cert ;;
+            19) cmd_smoke ;;
             0) printf '再见。\n'; return 0 ;;
             *) printf '无效选择：%s\n' "${choice}" ;;
         esac
@@ -930,6 +942,7 @@ main() {
         uninstall) cmd_uninstall ;;
         bbr) cmd_bbr "$@" ;;
         hy2) hy2_cmd "$@" ;;
+        smoke) cmd_smoke "$@" ;;
         help|--help|-h) usage ;;
         *) die "unknown command: ${cmd} (run with 'help' for usage)."; return 1 ;;
     esac

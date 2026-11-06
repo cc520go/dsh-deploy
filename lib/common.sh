@@ -420,6 +420,10 @@ install_lisa_launcher() {
         compgen -G "${src_dir}/lib/*.sh" > /dev/null || { die "no lib files in source dir: ${src_dir}/lib"; return 1; }
         cp "${target}" "${persist_target}" || { die "cannot install manage.sh"; return 1; }
         cp "${src_dir}/diagnose.sh" "${persist_dir}/diagnose.sh" || { die "cannot install diagnose.sh"; return 1; }
+        # 体检脚本：装完让用户能自己跑 `DSH smoke`，不需要再找文件。
+        if [[ -f "${src_dir}/smoke-remote.sh" ]]; then
+            cp "${src_dir}/smoke-remote.sh" "${persist_dir}/smoke-remote.sh" 2>/dev/null || true
+        fi
         cp "${src_dir}/lib/"*.sh "${persist_dir}/lib/" || { die "cannot install lib files"; return 1; }
         if [[ -f "${src_dir}/VERSION" ]]; then
             cp "${src_dir}/VERSION" "${persist_dir}/VERSION" || { die "cannot install VERSION"; return 1; }

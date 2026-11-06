@@ -79,6 +79,10 @@ for item in install.sh manage.sh diagnose.sh VERSION versions-hy2.conf \
     copy_item "${item}"
 done
 
+# 体检脚本随包发布，装在工具目录里，用户直接 `DSH smoke` 就能跑。
+cp "${REPO_ROOT}/tools/smoke-remote.sh" "${STAGE}/${NAME}/smoke-remote.sh" \
+    || fail "missing: tools/smoke-remote.sh"
+
 rm -rf "${STAGE}/${NAME}/dist" 2>/dev/null || true
 
 mkdir -p "${DIST}"
