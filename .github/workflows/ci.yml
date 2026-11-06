@@ -19,6 +19,11 @@ jobs:
     name: Debian 12 测试与打包
     runs-on: ubuntu-latest
     container: debian:12
+    # 容器作业默认用 sh(dash) 跑 run:，但那不是 bash —— 脚本里的
+    # ${PIPESTATUS[0]} 之类会直接报 "bad substitution"。全局指定 bash。
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
