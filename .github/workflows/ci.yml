@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   statuses: write
 
 jobs:
@@ -62,6 +62,20 @@ jobs:
             fi
             exit 1
           fi
+
+      - name: 失败时把日志推到 ci-log 分支
+        # 公开仓库的 Actions 日志要权限才能看；把测试日志推到一个
+        # 独立分支，匿名也能读，排障不用再猜。
+        if: failure()
+        continue-on-error: true
+        run: |
+          git config user.name "ci"
+          git config user.email "ci@users.noreply.github.com"
+          git checkout -B ci-log
+          cp /tmp/tests.log ci-failure.log 2>/dev/null || true
+          git add -A
+          git commit -m "ci failure log" || true
+          git push -f origin ci-log
 
       - name: 打包（单文件安装器 + 校验和）
         run: bash tools/build-release.sh
