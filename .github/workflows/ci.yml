@@ -27,7 +27,8 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            git ca-certificates curl shellcheck unzip iproute2 openssl
+            git ca-certificates curl wget shellcheck unzip iproute2 openssl \
+            kmod procps logrotate
 
       - name: 语法检查（bash -n）
         run: |
