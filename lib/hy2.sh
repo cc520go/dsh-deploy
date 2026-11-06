@@ -695,7 +695,7 @@ hy2_cmd_rotate_cert() {
     local link
     link="$(hy2_build_link "${pw}" "${ip}" "${pin}")"
     hy2_save_link "${link}" || log_warn "客户端链接文件写入失败（不影响服务）"
-    printf '\n证书已轮换。V2rayNG 新链接（旧链接作废，已存 ${HY2_CLIENT_LINK}）：\n%s\n' "${link}"
+    printf '\n证书已轮换。V2rayNG 新链接（旧链接作废，已存 %s）：\n%s\n' "${HY2_CLIENT_LINK}" "${link}"
     return 0
 }
 
