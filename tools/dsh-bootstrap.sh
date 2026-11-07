@@ -43,8 +43,11 @@ install_pkgs() {
     command -v apt-get >/dev/null 2>&1 || die "缺少 $*，且系统没有 apt-get；请手动安装后重试。"
     log "安装依赖: $*"
     export DEBIAN_FRONTEND=noninteractive
-    apt-get update -qq || die "apt-get update 失败"
-    apt-get install -y -qq --no-install-recommends "$@" >/dev/null || die "依赖安装失败: $*"
+    # Fresh Debian may still hold the dpkg lock (cloud-init / unattended
+    # upgrades). apt >= 2.0 can wait for it instead of failing.
+    apt-get -o DPkg::Lock::Timeout=300 update -qq || die "apt-get update 失败"
+    apt-get -o DPkg::Lock::Timeout=300 install -y -qq --no-install-recommends "$@" >/dev/null \
+        || die "依赖安装失败: $*"
 }
 
 missing=()
