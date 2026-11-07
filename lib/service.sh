@@ -2,7 +2,7 @@
 #
 # lib/service.sh — service control, safe binary swap, upgrade / downgrade /
 # rollback orchestration, and official update checks for
-# xray-reality-manager.
+# DSH.
 #
 # The safe-swap order (NEVER violated): backup -> download+verify ->
 # stop service -> replace files -> migrate permissions -> config test ->
@@ -36,7 +36,7 @@ service_reload_units() { run_systemctl daemon-reload; }
 # from the GitHub API, parsed with grep/sed (no jq). Empty on failure.
 official_latest_version() {
     local body tag
-    body="$(curl -fsSL -A "xray-reality-manager" \
+    body="$(curl -fsSL -A "DSH/1.1" \
         "https://api.github.com/repos/XTLS/Xray-core/releases/latest" 2>/dev/null)" \
         || { die "failed to query GitHub API for the latest release."; return 1; }
     tag="$(printf '%s' "${body}" | grep -oE '"tag_name"[[:space:]]*:[[:space:]]*"[^"]+"' | head -1 \

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# manage.sh — menu + direct commands for xray-reality-manager.
+# manage.sh — menu + direct commands for DSH.
 #
 # Menu display name: DSH 一键部署. Launch command: `DSH` (install.sh
 # copies this tool to a persistent dir and creates a /usr/local/bin/DSH
@@ -452,7 +452,7 @@ cmd_share() {
 # Menu 1 rollback timer (minimal, supplement only — never a substitute
 # for testing key login in a new session):
 #   Unit name: lisa-auth-rollback (systemd-run transient, 10 minutes).
-#   State file: /root/.xray-reality-manager/auth-rollback.state
+#   State file: ${DSH_STATE_DIR}/auth-rollback.state
 #     (test override: XRAY_TEST_AUTH_STATE, test mode only).
 #     Contents: "pending" + bak_main= + bak_list= lines, or "rolled_back".
 #   Cancel command: `manage.sh auth-confirm` (also offered when menu 1
@@ -466,8 +466,18 @@ cmd_share() {
 auth_state_file() {
     if [[ "${XRAY_TEST_MODE:-0}" == "1" ]]; then
         test_override XRAY_TEST_AUTH_STATE || printf '/tmp/lisa-auth-rollback-test.state'
+        return 0
+    fi
+    # 1.1.0 moved the state dir; read a pending pre-upgrade file from the
+    # legacy path once, then the next write goes to the new dir.
+    local new="${DSH_STATE_DIR}/auth-rollback.state"
+    local old="${LEGACY_STATE_DIR}/auth-rollback.state"
+    if [[ -f "${new}" ]]; then
+        printf '%s' "${new}"
+    elif [[ -f "${old}" ]]; then
+        printf '%s' "${old}"
     else
-        printf '/root/.xray-reality-manager/auth-rollback.state'
+        printf '%s' "${new}"
     fi
 }
 auth_log_file() {

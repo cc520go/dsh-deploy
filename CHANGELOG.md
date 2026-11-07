@@ -2,6 +2,20 @@
 
 记录 DSH 脚本自身的版本；Xray 核心版本见 `VERSION`。
 
+## 1.1.0 — 2026-11-07
+
+### 变更
+
+- 运行时路径收尾改名：
+  - 工具目录 `/usr/local/share/xray-reality-manager` → `/usr/local/share/dsh`
+  - 状态目录 `/root/.xray-reality-manager` → `/root/.dsh-deploy`
+  - logrotate 配置 → `/etc/logrotate.d/dsh`
+- 升级时先复制并校验 `node.params`，再切换；旧状态目录保留为软链一个版本（1.2.0 移除）。
+  旧工具目录打包到 `/root/dsh-legacy-tool-*.tar.gz` 后删除，避免两份代码并存。
+- HY2 生成的配置署名与 systemd `Description`、出口 IP 查询的 User-Agent、
+  `DSH diag` 标题改为 DSH；不重启 HY2 只为改一行注释。
+- `docs/ARCHITECTURE.md` 增加新路径说明；`docs/NAMING-MIGRATION.md` 记录迁移方案。
+
 ## 1.0.1 — 2026-11-07
 
 ### 修复

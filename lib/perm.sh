@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# lib/perm.sh — permission migration + validation for xray-reality-manager.
+# lib/perm.sh — permission migration + validation for DSH.
 #
 # The one layout the tool enforces (the official Xray-install layout, as
 # audited on the live machine):

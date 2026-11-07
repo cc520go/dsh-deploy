@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # lib/backup.sh — automatic snapshots before every change, retention, and
-# restore for xray-reality-manager.
+# restore for DSH.
 #
 # Snapshot layout: ${SNAPSHOT_PARENT}/xray-backup-<YYYYMMDD-HHMMSS>-<ver>/
 #   xray.bin            old binary (when present)

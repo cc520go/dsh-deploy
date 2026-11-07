@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# lib/hy2.sh — Hysteria2 add-on protocol for xray-reality-manager (v5 design).
+# lib/hy2.sh — Hysteria2 add-on protocol for DSH (v5 design).
 #
 # This module adds Hysteria2 as an OPTIONAL second protocol next to the
 # existing VLESS + Reality node. It never touches the main line:
@@ -439,7 +439,7 @@ hy2_set_journal_cap() {
     fi
     mkdir -p "$(dirname "${dropin}")" || return 0
     {
-        printf '# Written by xray-reality-manager HY2 add-on (%s)\n' "$(date +%F)"
+        printf '# Written by DSH HY2 add-on (%s)\n' "$(date +%F)"
         printf '# HY2 writes to the journal (no log file to rotate); without a\n'
         printf '# ceiling the journal can fill the disk and hurt the main line.\n'
         printf '[Journal]\nSystemMaxUse=200M\n'
@@ -456,7 +456,7 @@ hy2_write_unit() {
     trap "rm -f -- '${tmp}'" RETURN
     cat > "${tmp}" <<EOF
 [Unit]
-Description=Hysteria2 Server (managed by xray-reality-manager HY2 add-on)
+Description=Hysteria2 Server (managed by DSH HY2 add-on)
 Documentation=https://v2.hysteria.network/
 After=network-online.target
 Wants=network-online.target

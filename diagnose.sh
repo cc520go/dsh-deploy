@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# diagnose.sh — read-only diagnostics for xray-reality-manager.
+# diagnose.sh — read-only diagnostics for DSH.
 #
 # Checks: core presence + version, service state + autostart, config
 # existence + test, permission audit, port listening (+ owner), recent
@@ -214,7 +214,7 @@ diagnose_restore_offer() {
 main() {
     local loopback=0
     if [[ "${1:-}" == "--loopback" || "${1:-}" == "loopback" ]]; then loopback=1; fi
-    printf 'xray-reality-manager diagnostics\n'
+    printf 'DSH diagnostics\n'
     printf '================================\n'
 
     # 1. Core presence + version.

@@ -2,7 +2,7 @@
 #
 # lib/node.sh — node parameter generation, config rendering, config test,
 # share-link building, and the operator's local parameter file for
-# xray-reality-manager.
+# DSH.
 #
 # Security rule: NOTHING in this library prints a real secret. The share
 # link is printed to stdout only (the operator copies it into their own

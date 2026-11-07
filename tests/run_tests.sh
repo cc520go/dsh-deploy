@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# tests/run_tests.sh — test-environment validation for xray-reality-manager.
+# tests/run_tests.sh — test-environment validation for DSH.
 #
 # Runs entirely in a temp sandbox with a fake xray binary, fake installer
 # stub, and test-mode service helpers. NEVER touches the live VPS, real
@@ -46,7 +46,7 @@ mkdir -p "${SANDBOX}/bin" "${XRAY_CONF_DIR}" "${XRAY_SHARE_DIR}" \
 # absent; if it was present its content must be unchanged. This
 # distinguishes a test leak from a legitimate formal install, which
 # happens only after the test suite has finished.
-REAL_LOGROTATE_FILE="/etc/logrotate.d/xray-reality-manager"
+REAL_LOGROTATE_FILE="/etc/logrotate.d/dsh"
 if [[ -f "${REAL_LOGROTATE_FILE}" ]]; then
     TEST_START_LOGROTATE_HASH="$(sha256sum "${REAL_LOGROTATE_FILE}" | cut -d' ' -f1)"
 else
@@ -1137,10 +1137,10 @@ t_logrotate_and_rotated_log() {
     local lrdir="${SANDBOX}/logrotate.d"
     mkdir -p "${lrdir}"
     LOGROTATE_DIR="${lrdir}" install_logrotate_config || return 1
-    [[ -f "${lrdir}/xray-reality-manager" ]] || return 1
-    grep -q "copytruncate" "${lrdir}/xray-reality-manager" || return 1
-    grep -q "rotate 7" "${lrdir}/xray-reality-manager" || return 1
-    grep -q "/var/log/xray/\*.log" "${lrdir}/xray-reality-manager" || return 1
+    [[ -f "${lrdir}/dsh" ]] || return 1
+    grep -q "copytruncate" "${lrdir}/dsh" || return 1
+    grep -q "rotate 7" "${lrdir}/dsh" || return 1
+    grep -q "/var/log/xray/\*.log" "${lrdir}/dsh" || return 1
     # Rotated-log helper: current file wins; rotated file is the fallback.
     local logd="${SANDBOX}/xray-logs"
     mkdir -p "${logd}"
@@ -1429,6 +1429,48 @@ t_snapshot_known_good_prune() {
     return 0
 }
 
+t_migrate_legacy_state() {
+    local old="${SANDBOX}/legacy-state" new="${SANDBOX}/new-state" before
+    local save_new="${DSH_STATE_DIR}" save_old="${LEGACY_STATE_DIR}"
+    rm -rf -- "${old}" "${new}"
+    mkdir -p "${old}/bbr-backups" || return 1
+    printf 'host=203.0.113.1\n' > "${old}/node.params" || return 1
+    printf 'backup\n' > "${old}/bbr-backups/one" || return 1
+    before="$(sha256sum "${old}/node.params" | cut -d' ' -f1)"
+    DSH_STATE_DIR="${new}"
+    LEGACY_STATE_DIR="${old}"
+    migrate_legacy_state || return 1
+    [[ -f "${new}/node.params" ]] || return 1
+    [[ -L "${old}" ]] || return 1
+    [[ "$(readlink "${old}")" == "${new}" ]] || return 1
+    [[ "$(sha256sum "${new}/node.params" | cut -d' ' -f1)" == "${before}" ]] || return 1
+    [[ -f "${new}/bbr-backups/one" ]] || return 1
+    # Idempotent: a second run must be a no-op.
+    migrate_legacy_state || return 1
+    DSH_STATE_DIR="${save_new}"
+    LEGACY_STATE_DIR="${save_old}"
+    return 0
+}
+
+t_retire_legacy_tool_dir() {
+    local old="${SANDBOX}/legacy-tool" new="${SANDBOX}/new-tool" bak="${SANDBOX}/legacy-bak"
+    local save_tool="${TOOL_INSTALL_DIR}" save_old="${LEGACY_TOOL_DIR}" save_bak="${LEGACY_TOOL_BACKUP_DIR}"
+    rm -rf -- "${old}" "${new}" "${bak}"
+    mkdir -p "${old}" "${new}" "${bak}" || return 1
+    printf 'old\n' > "${old}/manage.sh"
+    printf 'new\n' > "${new}/manage.sh"
+    TOOL_INSTALL_DIR="${new}"
+    LEGACY_TOOL_DIR="${old}"
+    LEGACY_TOOL_BACKUP_DIR="${bak}"
+    retire_legacy_tool_dir || return 1
+    [[ ! -e "${old}" ]] || return 1
+    compgen -G "${bak}/dsh-legacy-tool-*.tar.gz" >/dev/null || return 1
+    TOOL_INSTALL_DIR="${save_tool}"
+    LEGACY_TOOL_DIR="${save_old}"
+    LEGACY_TOOL_BACKUP_DIR="${save_bak}"
+    return 0
+}
+
 t_snapshot_binary_reuse() {
     local d="${SANDBOX}/snapshot-reuse" snap1 snap2 before
     mkdir -p "${d}"
@@ -1539,9 +1581,9 @@ t_logrotate_smart_install_present() {
     export LOGROTATE_DIR="${d}/lr"
     unset LOGROTATE_TEST_APT_CMD
     install_logrotate_config || return 1
-    [[ -f "${d}/lr/xray-reality-manager" ]] || return 1
-    grep -q "copytruncate" "${d}/lr/xray-reality-manager" || return 1
-    grep -q "rotate 7" "${d}/lr/xray-reality-manager" || return 1
+    [[ -f "${d}/lr/dsh" ]] || return 1
+    grep -q "copytruncate" "${d}/lr/dsh" || return 1
+    grep -q "rotate 7" "${d}/lr/dsh" || return 1
     return 0
 }
 
@@ -1562,8 +1604,8 @@ t_logrotate_smart_install_apt_success() {
     out="$(install_logrotate_config 2>&1)" || return 1
     printf '%s' "${out}" | grep -q "机器上没有 logrotate，现在帮你装一个" || return 1
     [[ -f "${d}/apt.log" ]] || return 1
-    [[ -f "${d}/lr/xray-reality-manager" ]] || return 1
-    grep -q "copytruncate" "${d}/lr/xray-reality-manager" || return 1
+    [[ -f "${d}/lr/dsh" ]] || return 1
+    grep -q "copytruncate" "${d}/lr/dsh" || return 1
     return 0
 }
 
@@ -1583,7 +1625,7 @@ t_logrotate_smart_install_apt_failure() {
     out="$(install_logrotate_config 2>&1)"; rc=$?
     [[ "${rc}" -eq 0 ]] || return 1
     [[ -f "${d}/apt.log" ]] || return 1
-    [[ ! -f "${d}/lr/xray-reality-manager" ]] || return 1
+    [[ ! -f "${d}/lr/dsh" ]] || return 1
     printf '%s' "${out}" | grep -q "install failed" || return 1
     return 0
 }
@@ -1614,7 +1656,7 @@ t_test_sandbox_isolation() {
     # as it was when the suite started. A formal install after the
     # suite is a separate, expected step and is not covered here.
     [[ "${LOGROTATE_DIR}" == "${SANDBOX}"/* ]] || return 1
-    [[ -f "${SANDBOX}/logrotate.d/xray-reality-manager" ]] || return 1
+    [[ -f "${SANDBOX}/logrotate.d/dsh" ]] || return 1
     if [[ "${TEST_START_LOGROTATE_HASH}" == "absent" ]]; then
         [[ ! -f "${REAL_LOGROTATE_FILE}" ]] || return 1
     else
@@ -1727,6 +1769,8 @@ run_test t_test_override_production
 run_test t_node_apply_rollback
 run_test t_snapshot_latest_order
 run_test t_snapshot_known_good_prune
+run_test t_migrate_legacy_state
+run_test t_retire_legacy_tool_dir
 run_test t_snapshot_binary_reuse
 run_test t_diag_restore_offer
 run_test t_sni_precheck

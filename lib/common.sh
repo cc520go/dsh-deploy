@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# lib/common.sh — shared primitives for xray-reality-manager.
+# lib/common.sh — shared primitives for DSH.
 #
 # Contents: logging, fatal-error discipline, confirmation, overridable
 # paths, version helpers, architecture detection, URL encoding, service
@@ -116,17 +116,24 @@ XRAY_UNIT_DIR="${XRAY_UNIT_DIR:-/etc/systemd/system}"
 # Snapshot parent: snapshots are ${SNAPSHOT_PARENT}/xray-backup-<stamp>-<ver>/
 # (same naming convention the operator already uses under /root).
 SNAPSHOT_PARENT="${SNAPSHOT_PARENT:-/root}"
+# State dir: node.params, BBR backups, auth-rollback state.
+# 1.1.0 renamed this from /root/.xray-reality-manager; migrate_legacy_state()
+# copies the old dir once and leaves a symlink for one release.
+DSH_STATE_DIR="${DSH_STATE_DIR:-/root/.dsh-deploy}"
+LEGACY_STATE_DIR="${LEGACY_STATE_DIR:-/root/.xray-reality-manager}"
 # Operator's own node parameter file (root-only, on the server, never in repo).
-NODE_PARAMS_FILE="${NODE_PARAMS_FILE:-/root/.xray-reality-manager/node.params}"
-# Menu launcher directory (default /usr/local/bin, so `lisa` is on PATH).
+NODE_PARAMS_FILE="${NODE_PARAMS_FILE:-${DSH_STATE_DIR}/node.params}"
+# Menu launcher directory (default /usr/local/bin, so `DSH` is on PATH).
 LAUNCHER_DIR="${LAUNCHER_DIR:-/usr/local/bin}"
 LAUNCHER_NAME="DSH"
 # 旧命令 lisa 已废弃：安装时如果发现它指向本工具，顺手清掉。
 LEGACY_LAUNCHER_NAME="lisa"
-# Persistent home for the installed tool (default /usr/local/share/...).
-# The launcher points here, never at the download dir (e.g. /tmp/xrm),
-# so the menu survives /tmp cleanups and reboots.
-TOOL_INSTALL_DIR="${TOOL_INSTALL_DIR:-/usr/local/share/xray-reality-manager}"
+# Persistent home for the installed tool. 1.1.0 renamed it from
+# /usr/local/share/xray-reality-manager; the old dir is archived and
+# removed after the new launcher is in place (retire_legacy_tool_dir).
+TOOL_INSTALL_DIR="${TOOL_INSTALL_DIR:-/usr/local/share/dsh}"
+LEGACY_TOOL_DIR="${LEGACY_TOOL_DIR:-/usr/local/share/xray-reality-manager}"
+LEGACY_TOOL_BACKUP_DIR="${LEGACY_TOOL_BACKUP_DIR:-/root}"
 
 # Default core version: read from the VERSION file next to lib/, else pinned.
 default_version() {
@@ -382,6 +389,76 @@ last_error_log_time() {
         return 0
     fi
     printf 'no error log file (see menu 11 for journalctl logs)'
+    return 0
+}
+
+# migrate_legacy_state: one-time move of the old state dir to DSH_STATE_DIR.
+# Copies first, verifies node.params, then replaces the old dir with a
+# symlink so 1.0.x-era paths keep working for one release. Aborts (without
+# deleting the old dir) when the two node.params files disagree.
+migrate_legacy_state() {
+    local old="${LEGACY_STATE_DIR}" new="${DSH_STATE_DIR}" a b
+    [[ "${old}" != "${new}" ]] || return 0
+    # The suite must never touch the real /root state dir unless a test
+    # explicitly points LEGACY_STATE_DIR at a sandbox path.
+    if [[ "${XRAY_TEST_MODE:-0}" == "1" && "${old}" == "/root/.xray-reality-manager" ]]; then
+        return 0
+    fi
+    if [[ -L "${old}" ]]; then
+        if [[ "$(readlink "${old}")" == "${new}" ]]; then
+            return 0
+        fi
+        log_warn "legacy state path ${old} is a symlink to $(readlink "${old}"); leaving it unchanged."
+        return 0
+    fi
+    [[ -d "${old}" ]] || return 0
+    if [[ ! -d "${new}" ]]; then
+        cp -a "${old}" "${new}" || { log_error "cannot copy legacy state dir ${old}"; return 1; }
+    else
+        # Keep new files authoritative; only fill in what is missing.
+        cp -an "${old}/." "${new}/" || { log_error "cannot merge legacy state into ${new}"; return 1; }
+    fi
+    if [[ -f "${old}/node.params" ]]; then
+        [[ -f "${new}/node.params" ]] || { log_error "node.params missing after migration"; return 1; }
+        a="$(sha256sum "${old}/node.params" | cut -d' ' -f1)"
+        b="$(sha256sum "${new}/node.params" | cut -d' ' -f1)"
+        if [[ "${a}" != "${b}" ]]; then
+            log_error "legacy and new node.params differ; refusing to merge (old dir kept at ${old})."
+            return 1
+        fi
+    fi
+    chmod 700 "${new}" 2>/dev/null || true
+    rm -rf "${old}" || { log_error "cannot remove legacy state dir ${old}"; return 1; }
+    ln -s "${new}" "${old}" || { log_error "cannot create legacy state symlink ${old}"; return 1; }
+    log_info "legacy state migrated: ${old} -> ${new}"
+    return 0
+}
+
+# retire_legacy_tool_dir: after the new launcher works, archive the old
+# tool directory and remove it, so two copies of the code cannot drift.
+retire_legacy_tool_dir() {
+    local old="${LEGACY_TOOL_DIR}" new="${TOOL_INSTALL_DIR}" stamp backup
+    [[ "${old}" != "${new}" ]] || return 0
+    if [[ "${XRAY_TEST_MODE:-0}" == "1" && "${old}" == "/usr/local/share/xray-reality-manager" ]]; then
+        return 0
+    fi
+    if [[ -L "${old}" ]]; then
+        rm -f "${old}" 2>/dev/null || true
+        return 0
+    fi
+    [[ -d "${old}" ]] || return 0
+    if [[ ! -f "${new}/manage.sh" ]]; then
+        log_warn "new tool dir ${new} is not ready; keeping ${old} for now."
+        return 0
+    fi
+    stamp="$(date +%Y%m%d-%H%M%S 2>/dev/null || printf 'unknown')"
+    backup="${LEGACY_TOOL_BACKUP_DIR}/dsh-legacy-tool-${stamp}.tar.gz"
+    if tar -czf "${backup}" -C "$(dirname "${old}")" "$(basename "${old}")" 2>/dev/null; then
+        chmod 600 "${backup}" 2>/dev/null || true
+        rm -rf "${old}" && log_info "legacy tool dir retired (backup: ${backup})"
+    else
+        log_warn "could not archive ${old}; leaving it in place."
+    fi
     return 0
 }
 

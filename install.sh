@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# install.sh — one-click install and initialization for xray-reality-manager.
+# install.sh — one-click install and initialization for DSH.
 #
 # Fresh install: environment checks -> download verified core -> official
 # installer (local mode, xray user) -> permission migration -> `DSH`
@@ -349,6 +349,12 @@ _install_logrotate_rule() {
         # suite installs the rule without a real logrotate binary.
         log_info "logrotate config installed: ${dest} (copytruncate, daily, 7 rotations; no service restart for rotation)."
     fi
+    # 1.1.0 renamed the rule file; drop the old one only when it is ours.
+    local legacy="${destdir}/xray-reality-manager"
+    if [[ "${legacy}" != "${dest}" && -f "${legacy}" ]] \
+        && grep -q '/var/log/xray/\*\.log' "${legacy}" 2>/dev/null; then
+        rm -f -- "${legacy}" && log_info "removed legacy logrotate config: ${legacy}"
+    fi
     return 0
 }
 
@@ -369,9 +375,9 @@ _install_logrotate_rule() {
 #     logrotate binary. Missing template or an unwritable dir only
 #     warns, never fails the install.
 install_logrotate_config() {
-    local src="${SCRIPT_DIR}/logrotate/xray-reality-manager"
+    local src="${SCRIPT_DIR}/logrotate/dsh"
     local destdir="${LOGROTATE_DIR:-/etc/logrotate.d}"
-    local dest="${destdir}/xray-reality-manager"
+    local dest="${destdir}/dsh"
     if [[ ! -f "${src}" ]]; then
         log_warn "logrotate config source not found (${src}); skipping log rotation install."
         return 0
@@ -808,6 +814,7 @@ handle_already_installed() {
         # a failed config test aborted before the launcher step, leaving
         # no menu at all (and the error's "backup menu (option 6)" unreachable).
         install_launcher "${SCRIPT_DIR}/manage.sh" || return 1
+        retire_legacy_tool_dir || true
         if [[ ! -f "${XRAY_CONF}" ]] || [[ "$(tr -d '[:space:]' < "${XRAY_CONF}")" == "{}" ]]; then
             log_info "no node config yet (installer placeholder); completing node setup."
             node_setup || return 1
@@ -948,6 +955,8 @@ main() {
     if [[ "${check_only}" -eq 1 ]]; then
         return 0
     fi
+    # 1.1.0: move the old state dir before anything reads node.params.
+    migrate_legacy_state || { die "legacy state migration failed; old install left untouched."; return 1; }
     if [[ -z "${version}" ]]; then
         version="$(default_version)"
     fi
@@ -970,6 +979,7 @@ main() {
     # Launcher first (see handle_already_installed): a failed node
     # setup must still leave `DSH` available for diagnosis.
     install_launcher "${SCRIPT_DIR}/manage.sh" || return 1
+    retire_legacy_tool_dir || true
     install_smoke_timer || true
     if [[ -f "${XRAY_CONF}" ]] && [[ "$(tr -d '[:space:]' < "${XRAY_CONF}")" != "{}" ]]; then
         log_info "existing non-empty config found; preserving it (not overwritten)."

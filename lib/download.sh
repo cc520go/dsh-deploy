@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # lib/download.sh — download + official .dgst verification + official
-# installer wrapping for xray-reality-manager.
+# installer wrapping for DSH.
 #
 # Design rule: this tool downloads a core zip AND its .dgst into a temp
 # dir and verifies ALL FOUR digests itself BEFORE invoking the official

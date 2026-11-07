@@ -14,7 +14,7 @@ shellcheck -S error install.sh manage.sh diagnose.sh lib/*.sh
 
 - **改名要全仓搜**：改启动器、路径、命令名后，`grep -rn "旧名" . --exclude-dir=.git`，
   注释、文档、`tools/`、`tests/` 都算。历史上漏过 `tools/smoke-remote.sh`，验收一直报启动器缺失。
-- **运行路径改名必须带迁移**：`/usr/local/share/xray-reality-manager`、`/root/.xray-reality-manager`
+- **运行路径改名必须带迁移**：`/usr/local/share/dsh`、`/root/.dsh-deploy`
   这类路径已经装在别人的机器上，不能只改常量；要么迁移旧目录，要么兼容读取一个版本周期。
 - **不要提交密钥、节点链接、服务器密码**。签名私钥只留在发布机的 `~/.gnupg`，不进仓库。
 - 涉及 systemd、权限、快照恢复的改动，必须在真机（或至少 Debian 12）上验证一次，不能只跑测试。

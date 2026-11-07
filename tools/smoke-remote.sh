@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # tools/smoke-remote.sh — acceptance checklist for a machine that is
-# supposed to run xray-reality-manager with the Hysteria2 add-on.
+# supposed to run DSH with the Hysteria2 add-on.
 #
 # Runs ON THE SERVER, read-only: it never starts, stops, edits or removes
 # anything. Every check prints PASS / FAIL / SKIP and the script exits
@@ -29,7 +29,8 @@ HY2_USER="${HY2_USER:-hysteria}"
 HY2_MARKER="${HY2_MARKER:-${HY2_CONF_DIR}/.managed-by-hy2addon}"
 HY2_PORT="${HY2_PORT:-443}"
 LAUNCHER="${LAUNCHER:-/usr/local/bin/DSH}"
-TOOL_DIR="${TOOL_DIR:-/usr/local/share/xray-reality-manager}"
+TOOL_DIR="${TOOL_DIR:-/usr/local/share/dsh}"
+[[ -d "${TOOL_DIR}" ]] || TOOL_DIR="/usr/local/share/xray-reality-manager"
 WORK="$(mktemp -d)"
 trap 'rm -rf -- "${WORK}"' EXIT
 

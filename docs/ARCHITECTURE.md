@@ -55,11 +55,12 @@ HY2 的 `masquerade` 只影响未通过认证的 HTTP/3 探针，不影响隧道
 
 - 配置目录 `/usr/local/etc/xray`：`750 root:xray`，`config.json` `640 root:xray`。
 - 日志 `/var/log/xray`：`700 xray:xray`。
-- 工具安装目录 `/usr/local/share/xray-reality-manager`：历史名字，保留是为了已装机器平滑升级；
-  改名需要带迁移，不能直接换常量。
-- 状态目录 `/root/.xray-reality-manager`：同样是历史名字，存 BBR 备份与节点参数。
-  改名的完整方案（目标路径、迁移步骤、兼容窗口）见 [NAMING-MIGRATION](NAMING-MIGRATION.md)，
-  计划 1.1.0 执行；1.0.x 不做运行时路径变更。
+- 工具安装目录 `/usr/local/share/dsh`（1.1.0 起）。升级时旧目录
+  `/usr/local/share/xray-reality-manager` 会先打包到 `/root/dsh-legacy-tool-*.tar.gz` 再删除。
+- 状态目录 `/root/.dsh-deploy`（1.1.0 起），存 `node.params`、BBR 备份、认证回滚状态。
+  旧的 `/root/.xray-reality-manager` 会迁移并保留为软链，1.2.0 再移除。
+- logrotate 配置 `/etc/logrotate.d/dsh`（1.1.0 起），旧文件在确认是本工具的规则后删除。
+  迁移细节见 [NAMING-MIGRATION](NAMING-MIGRATION.md)。
 
 ## 发布
 

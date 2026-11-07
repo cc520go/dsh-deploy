@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# lib/bbr.sh — official-kernel BBR+FQ for xray-reality-manager (menu 12).
+# lib/bbr.sh — official-kernel BBR+FQ for DSH (menu 12).
 #
 # Scope: only the in-tree BBR algorithm plus the fq qdisc. This module does
 # NOT install a third-party kernel, does NOT reboot, and does NOT touch Xray
@@ -26,7 +26,7 @@
 
 BBR_SYSCTL_FILE="${BBR_SYSCTL_FILE:-/etc/sysctl.d/99-dsh-bbr.conf}"
 BBR_LEGACY_SYSCTL_FILE="${BBR_LEGACY_SYSCTL_FILE:-/etc/sysctl.d/99-lisa-bbr.conf}"
-BBR_BACKUP_DIR="${BBR_BACKUP_DIR:-/root/.xray-reality-manager/bbr-backups}"
+BBR_BACKUP_DIR="${BBR_BACKUP_DIR:-${DSH_STATE_DIR:-/root/.dsh-deploy}/bbr-backups}"
 BBR_LEGACY_ONESHOT_UNIT="${BBR_LEGACY_ONESHOT_UNIT:-/etc/systemd/system/lisa-bbr3-oneshot.service}"
 
 # bbr_congestion: current sysctl congestion (stdout, empty on failure).
