@@ -468,17 +468,7 @@ auth_state_file() {
         test_override XRAY_TEST_AUTH_STATE || printf '/tmp/lisa-auth-rollback-test.state'
         return 0
     fi
-    # 1.1.0 moved the state dir; read a pending pre-upgrade file from the
-    # legacy path once, then the next write goes to the new dir.
-    local new="${DSH_STATE_DIR}/auth-rollback.state"
-    local old="${LEGACY_STATE_DIR}/auth-rollback.state"
-    if [[ -f "${new}" ]]; then
-        printf '%s' "${new}"
-    elif [[ -f "${old}" ]]; then
-        printf '%s' "${old}"
-    else
-        printf '%s' "${new}"
-    fi
+    printf '%s' "${DSH_STATE_DIR}/auth-rollback.state"
 }
 auth_log_file() {
     local state

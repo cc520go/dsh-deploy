@@ -393,9 +393,9 @@ last_error_log_time() {
 }
 
 # migrate_legacy_state: one-time move of the old state dir to DSH_STATE_DIR.
-# Copies first, verifies node.params, then replaces the old dir with a
-# symlink so 1.0.x-era paths keep working for one release. Aborts (without
-# deleting the old dir) when the two node.params files disagree.
+# Copies first, verifies node.params, then deletes the old dir. Since
+# 1.2.0 no compatibility symlink is kept. Aborts (without deleting the old
+# dir) when the two node.params files disagree.
 migrate_legacy_state() {
     local old="${LEGACY_STATE_DIR}" new="${DSH_STATE_DIR}" a b
     [[ "${old}" != "${new}" ]] || return 0
@@ -406,6 +406,8 @@ migrate_legacy_state() {
     fi
     if [[ -L "${old}" ]]; then
         if [[ "$(readlink "${old}")" == "${new}" ]]; then
+            # 1.1.0 left this compatibility symlink; 1.2.0 removes it.
+            rm -f "${old}" && log_info "removed legacy state symlink: ${old}"
             return 0
         fi
         log_warn "legacy state path ${old} is a symlink to $(readlink "${old}"); leaving it unchanged."
@@ -429,8 +431,7 @@ migrate_legacy_state() {
     fi
     chmod 700 "${new}" 2>/dev/null || true
     rm -rf "${old}" || { log_error "cannot remove legacy state dir ${old}"; return 1; }
-    ln -s "${new}" "${old}" || { log_error "cannot create legacy state symlink ${old}"; return 1; }
-    log_info "legacy state migrated: ${old} -> ${new}"
+    log_info "legacy state migrated: ${old} -> ${new} (legacy path removed)"
     return 0
 }
 

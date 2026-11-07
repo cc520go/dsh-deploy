@@ -2,6 +2,16 @@
 
 记录 DSH 脚本自身的版本；Xray 核心版本见 `VERSION`。
 
+## 1.2.0 — 2026-11-07
+
+### 变更
+
+- 移除 1.1.0 的旧状态目录兼容软链：`migrate_legacy_state` 迁移校验后直接删除
+  `/root/.xray-reality-manager`，不再创建软链；1.1.0 留下的软链在升级时被清理。
+- 认证回滚状态与 `smoke-remote.sh` 不再回退旧路径。
+- 停止跟踪 `dist/` 构建产物（`.gitignore`），发布只走 GitHub Release 与镜像；
+  仓库里不再出现版本落后的安装包。
+
 ## 1.1.0 — 2026-11-07
 
 ### 变更

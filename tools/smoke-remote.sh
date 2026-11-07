@@ -30,7 +30,6 @@ HY2_MARKER="${HY2_MARKER:-${HY2_CONF_DIR}/.managed-by-hy2addon}"
 HY2_PORT="${HY2_PORT:-443}"
 LAUNCHER="${LAUNCHER:-/usr/local/bin/DSH}"
 TOOL_DIR="${TOOL_DIR:-/usr/local/share/dsh}"
-[[ -d "${TOOL_DIR}" ]] || TOOL_DIR="/usr/local/share/xray-reality-manager"
 WORK="$(mktemp -d)"
 trap 'rm -rf -- "${WORK}"' EXIT
 

@@ -1441,12 +1441,26 @@ t_migrate_legacy_state() {
     LEGACY_STATE_DIR="${old}"
     migrate_legacy_state || return 1
     [[ -f "${new}/node.params" ]] || return 1
-    [[ -L "${old}" ]] || return 1
-    [[ "$(readlink "${old}")" == "${new}" ]] || return 1
+    [[ ! -e "${old}" && ! -L "${old}" ]] || return 1
     [[ "$(sha256sum "${new}/node.params" | cut -d' ' -f1)" == "${before}" ]] || return 1
     [[ -f "${new}/bbr-backups/one" ]] || return 1
     # Idempotent: a second run must be a no-op.
     migrate_legacy_state || return 1
+    DSH_STATE_DIR="${save_new}"
+    LEGACY_STATE_DIR="${save_old}"
+    return 0
+}
+
+t_migrate_removes_symlink() {
+    local old="${SANDBOX}/legacy-symlink" new="${SANDBOX}/new-symlink-state"
+    local save_new="${DSH_STATE_DIR}" save_old="${LEGACY_STATE_DIR}"
+    rm -rf -- "${old}" "${new}"
+    mkdir -p "${new}" || return 1
+    ln -s "${new}" "${old}" || return 1
+    DSH_STATE_DIR="${new}"
+    LEGACY_STATE_DIR="${old}"
+    migrate_legacy_state || return 1
+    [[ ! -e "${old}" && ! -L "${old}" ]] || return 1
     DSH_STATE_DIR="${save_new}"
     LEGACY_STATE_DIR="${save_old}"
     return 0
@@ -1770,6 +1784,7 @@ run_test t_node_apply_rollback
 run_test t_snapshot_latest_order
 run_test t_snapshot_known_good_prune
 run_test t_migrate_legacy_state
+run_test t_migrate_removes_symlink
 run_test t_retire_legacy_tool_dir
 run_test t_snapshot_binary_reuse
 run_test t_diag_restore_offer

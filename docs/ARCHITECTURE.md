@@ -58,7 +58,7 @@ HY2 的 `masquerade` 只影响未通过认证的 HTTP/3 探针，不影响隧道
 - 工具安装目录 `/usr/local/share/dsh`（1.1.0 起）。升级时旧目录
   `/usr/local/share/xray-reality-manager` 会先打包到 `/root/dsh-legacy-tool-*.tar.gz` 再删除。
 - 状态目录 `/root/.dsh-deploy`（1.1.0 起），存 `node.params`、BBR 备份、认证回滚状态。
-  旧的 `/root/.xray-reality-manager` 会迁移并保留为软链，1.2.0 再移除。
+  1.0.x 的旧目录在升级时迁移后删除；1.1.0 曾保留的兼容软链已在 1.2.0 移除。
 - logrotate 配置 `/etc/logrotate.d/dsh`（1.1.0 起），旧文件在确认是本工具的规则后删除。
   迁移细节见 [NAMING-MIGRATION](NAMING-MIGRATION.md)。
 
