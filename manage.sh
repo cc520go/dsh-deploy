@@ -82,6 +82,7 @@ EOF
     printf '  Reality · Hysteria2\n'
     printf '  Xray %-9s Reality %-9s HY2 %s\n' \
         "$(current_version)" "${xray_state}" "${hy2_state}"
+    printf '  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n'
     printf '\n'
 }
 
@@ -864,20 +865,22 @@ menu() {
     local choice
     while true; do
         banner
-        printf '  系统\n'
+        printf '  ▸ 系统\n'
         printf '   1 认证方式      2 核心版本\n'
         printf '   3 检查更新      4 升级核心\n'
         printf '   5 回滚快照      6 备份快照\n'
         printf '   7 节点配置      8 通用链接\n'
-        printf '  运维\n'
+        printf '  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n'
+        printf '  ▸ 运维\n'
         printf '   9 状态检查     10 线路诊断\n'
         printf '  11 查看日志     12 BBR 加速\n'
-        printf '  Hysteria2（附加协议）\n'
+        printf '  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n'
+        printf '  ▸ Hysteria2（附加协议）\n'
         printf '  13 安装/升级    14 卸载\n'
         printf '  15 查看链接     16 状态/重启\n'
         printf '  17 日志         18 轮换证书\n'
         printf '  19 一键体检\n'
-        printf '  ────────────────────────────\n'
+        printf '  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n'
         printf '   0 退出\n'
         printf '请选择 [0-19]: '
         read -r choice || return 0
