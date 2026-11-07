@@ -22,6 +22,9 @@
 
 ### 文档
 
+- 发布签名密钥轮换：旧私钥已删除，1.0.1 起使用新公钥（指纹
+  `8E25C6FC8FA01719137FAAE6BC9AF5236E467872`）；旧公钥保留为
+  `docs/dsh-signing-key-1.0.0.asc`，用于验证 1.0.0 及更早版本。
 - 新增 `docs/ARCHITECTURE.md`、`CONTRIBUTING.md`、本文件。
 - README 的推荐渠道改为 GitHub Release；镜像站标注为可能离线的可选加速节点。
 - `docs/TODO.md` 修正失效的安装器文件名。

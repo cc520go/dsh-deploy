@@ -94,7 +94,7 @@
 
 - 每次发布：`bash tools/build-release.sh`（自动签名）→ 传镜像 → Release 附件同步换新。
 - **签名私钥只在本机 `/root/.gnupg`**（release@dsh-deploy，指纹
-  `63AEB2BD09A2458B54D7AB1E7F938C08CA8E68D6`）。丢失就无法签新版本，建议离线备份。
+  `8E25C6FC8FA01719137FAAE6BC9AF5236E467872`）。丢失就无法签新版本，建议离线备份。
 - 镜像与 Release 必须指向同一构建；换版本后 `sha256sum` 三处要对得上。
 
 ## 已知限制（别忘）

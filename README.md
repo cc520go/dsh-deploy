@@ -60,7 +60,10 @@ bash dsh-install-1.0.1.sh --auto --with-hy2
 ### 验证发布物（推荐，30 秒）
 
 发布物用 GPG 分离签名，公钥在 `docs/dsh-signing-key.asc`（指纹
-`63AEB2BD09A2458B54D7AB1E7F938C08CA8E68D6`）。一次性导入公钥后，每次发布都能自动验：
+`8E25C6FC8FA01719137FAAE6BC9AF5236E467872`）。一次性导入公钥后，每次发布都能自动验。
+
+> 2026-11-07 密钥轮换：旧私钥已删除，1.0.1 起使用新公钥。验证 1.0.0 及更早的发布物，
+> 请用 `docs/dsh-signing-key-1.0.0.asc`（旧指纹 `63AEB2BD09A2458B54D7AB1E7F938C08CA8E68D6`）。
 
 ```bash
 # 一次性：导入公钥
