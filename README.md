@@ -39,8 +39,8 @@ git clone https://github.com/cc520go/dsh-deploy.git /tmp/dsh && cd /tmp/dsh && b
 把 `lisa-install-<版本>.sh`（Release 附件或 `dist/`）用 WinSCP / scp / 面板文件管理器上传，然后：
 
 ```bash
-sha256sum lisa-install-26.10.21.sh      # 与 SHA256SUMS 对比
-bash lisa-install-26.10.21.sh --auto --with-hy2
+sha256sum lisa-install-26.10.31.sh      # 与 SHA256SUMS 对比
+bash lisa-install-26.10.31.sh --auto --with-hy2
 ```
 
 ### 验证发布物（推荐，30 秒）
@@ -74,7 +74,7 @@ gpg --verify SHA256SUMS.asc SHA256SUMS && sha256sum -c SHA256SUMS --ignore-missi
 
 | 项目 | 值 |
 |---|---|
-| 主线 | VLESS + Vision + Reality，TCP 443，Xray 26.10.21 |
+| 主线 | VLESS + Vision + Reality，TCP 443，Xray 26.10.31 |
 | 附加协议 | Hysteria2 2.13.0（官方二进制），UDP 443，画像 A（无混淆 + masquerade） |
 | 声明带宽 | 上传 50 Mbps / 下载 250 Mbps（钉死，不做菜单项） |
 | 证书 | 自签 EC P-256，100 年，SAN = 公网 IP + SNI |

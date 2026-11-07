@@ -304,9 +304,9 @@ bbr_version() {
     printf 'congestion     : %s\n' "$(bbr_congestion)"
     printf 'qdisc          : %s\n' "$(bbr_qdisc)"
     if [[ -f "${BBR_SYSCTL_FILE}" ]]; then
-        printf 'lisa sysctl    : %s (present)\n' "${BBR_SYSCTL_FILE}"
+        printf 'DSH sysctl    : %s (present)\n' "${BBR_SYSCTL_FILE}"
     else
-        printf 'lisa sysctl    : (absent)\n'
+        printf 'DSH sysctl    : (absent)\n'
     fi
     return 0
 }
@@ -326,9 +326,9 @@ bbr_status() {
     [[ "${cong}" == "bbr" ]] || ok=0
     [[ "${qdisc}" == "fq" ]] || ok=0
     if [[ -f "${BBR_SYSCTL_FILE}" ]]; then
-        printf 'lisa sysctl    : present\n'
+        printf 'DSH sysctl    : present\n'
     else
-        printf 'lisa sysctl    : absent (FQ was not persisted by Lisa; runtime values above may still be bbr/fq from another tool)\n'
+        printf 'DSH sysctl    : absent (FQ was not persisted by Lisa; runtime values above may still be bbr/fq from another tool)\n'
         ok=0
     fi
     if [[ "${ok}" -eq 1 ]]; then
@@ -444,7 +444,7 @@ bbr_oneshot_install() {
     mkdir -p "${dir}" || { log_warn "cannot create oneshot unit dir: ${dir}"; return 1; }
     cat > "${BBR_ONESHOT_UNIT}" <<'UNITEOF'
 [Unit]
-Description=Lisa BBRv3 one-shot auto-enable FQ (runs once after reboot, then removes itself)
+Description=DSH BBRv3 one-shot auto-enable FQ (runs once after reboot, then removes itself)
 After=network.target
 [Service]
 Type=oneshot
@@ -474,7 +474,7 @@ bbr_auto_fq() {
         return 1
     fi
     if ! bbr_enable_fq; then
-        log_warn "BBR oneshot failed: FQ enable failed (rolled back); oneshot disabled, run 'lisa bbr bbr3' manually after checking."
+        log_warn "BBR oneshot failed: FQ enable failed (rolled back); oneshot disabled, run 'DSH bbr bbr3' manually after checking."
         bbr_oneshot_write_result "FAIL" "fq enable failed"
         bbr_oneshot_cleanup || true
         return 1
@@ -610,10 +610,10 @@ bbr_install_kernel() {
         log_warn "old kernel ${old_kernel} not found in dpkg after install; fallback to the old kernel is lost. New kernel ${ver} is installed and verified, but keep console access until the new kernel is proven to boot."
     fi
     if ! bbr_oneshot_install; then
-        log_warn "BBRv3 oneshot auto-enable could not be installed; kernel is installed, but after reboot run 'lisa bbr bbr3' manually to enable FQ."
+        log_warn "BBRv3 oneshot auto-enable could not be installed; kernel is installed, but after reboot run 'DSH bbr bbr3' manually to enable FQ."
     fi
     log_info "BBRv3 kernel ${ver} installed (tag ${tag}; backup: ${bdir})."
-    printf 'Reboot to boot the new kernel; on the next boot FQ is auto-enabled by the one-shot unit if the v3 kernel is running, then the unit removes itself. Verify with lisa bbr status.\n'
+    printf 'Reboot to boot the new kernel; on the next boot FQ is auto-enabled by the one-shot unit if the v3 kernel is running, then the unit removes itself. Verify with DSH bbr status.\n'
     bbr_prompt_reboot "boot the new BBRv3 kernel ${ver}; after reboot, FQ is auto-enabled by the one-shot unit — verify with DSH bbr status, and only re-run BBR3+FQ manually if FQ is not enabled"
     return 0
 }
@@ -667,7 +667,7 @@ bbr3_enable() {
         printf 'BBRv3 kernel is installed but not running (module version %s, running kernel %s).\n' "${ver}" "$(uname -r)"
         printf 'FQ is NOT enabled now, because enabling it on the old kernel would be v1, not v3.\n'
         if [[ ! -f "${BBR_ONESHOT_UNIT}" ]]; then
-            bbr_oneshot_install || log_warn "BBRv3 oneshot auto-enable could not be installed; after reboot run 'lisa bbr bbr3' manually to enable FQ."
+            bbr_oneshot_install || log_warn "BBRv3 oneshot auto-enable could not be installed; after reboot run 'DSH bbr bbr3' manually to enable FQ."
         fi
         bbr_prompt_reboot "boot the BBRv3 kernel (select it in GRUB if needed); on the next boot FQ is auto-enabled by the one-shot unit if v3 is running"
         return 0
@@ -687,13 +687,13 @@ bbr_clear() {
     if [[ ! -f "${BBR_SYSCTL_FILE}" ]]; then
         if [[ -f "${BBR_ONESHOT_UNIT}" ]]; then
             bbr_oneshot_cleanup || true
-            log_info "BBR oneshot auto-enable removed (no Lisa BBR sysctl file to clear)."
+            log_info "BBR oneshot auto-enable removed (no DSH BBR sysctl file to clear)."
         else
-            log_info "no Lisa BBR sysctl file (${BBR_SYSCTL_FILE}); nothing to clear (runtime values, if any, came from another tool; reboot to fully revert them)."
+            log_info "no DSH BBR sysctl file (${BBR_SYSCTL_FILE}); nothing to clear (runtime values, if any, came from another tool; reboot to fully revert them)."
         fi
         return 0
     fi
-    confirm "Impact: Lisa BBR sysctl file ${BBR_SYSCTL_FILE} will be deleted and sysctl reloaded (congestion/qdisc revert to system defaults for new connections). The BBR kernel is NOT uninstalled by clear. Runtime qdisc reverts immediately when known, otherwise on reboot." || { log_info "BBR clear cancelled."; return 1; }
+    confirm "Impact: DSH BBR sysctl file ${BBR_SYSCTL_FILE} will be deleted and sysctl reloaded (congestion/qdisc revert to system defaults for new connections). The BBR kernel is NOT uninstalled by clear. Runtime qdisc reverts immediately when known, otherwise on reboot." || { log_info "BBR clear cancelled."; return 1; }
     bbr_oneshot_cleanup || true
     stamp="$(bbr_stamp)"
     bdir="$(bbr_backup_dir "${stamp}")" || return 1

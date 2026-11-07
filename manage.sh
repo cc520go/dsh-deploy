@@ -485,7 +485,7 @@ auth_timer_start() {
     else
         log_warn "auth rollback timer: systemd-run not available; no timer started (supplement only)."
     fi
-    printf '回滚定时器已启动：10 分钟内回菜单确认测通，否则自动恢复备份的 sshd 配置。确认命令：lisa auth-confirm（或再次进菜单 1）。\n'
+    printf '回滚定时器已启动：10 分钟内回菜单确认测通，否则自动恢复备份的 sshd 配置。确认命令：DSH auth-confirm（或再次进菜单 1）。\n'
     return 0
 }
 auth_timer_cancel() {

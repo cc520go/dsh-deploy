@@ -443,6 +443,8 @@ install_lisa_launcher() {
         # 体检脚本：装完让用户能自己跑 `DSH smoke`，不需要再找文件。
         if [[ -f "${src_dir}/smoke-remote.sh" ]]; then
             cp "${src_dir}/smoke-remote.sh" "${persist_dir}/smoke-remote.sh" 2>/dev/null || true
+        elif [[ -f "${src_dir}/tools/smoke-remote.sh" ]]; then
+            cp "${src_dir}/tools/smoke-remote.sh" "${persist_dir}/smoke-remote.sh" 2>/dev/null || true
         fi
         cp "${src_dir}/lib/"*.sh "${persist_dir}/lib/" || { die "cannot install lib files"; return 1; }
         if [[ -f "${src_dir}/VERSION" ]]; then
