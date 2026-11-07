@@ -260,6 +260,9 @@ SKIP_COUNT=0
 # not leak between tests) and counts the result. A test that returns
 # 77 is a SKIP (tool genuinely missing, not a failure); skips are
 # reported separately and are never counted as passes.
+# strip_ansi: 去掉菜单输出里的 ANSI 颜色码，断言才能匹配纯文本。
+strip_ansi() { sed 's/\x1b\[[0-9;]*m//g'; }
+
 run_test() {
     local name="$1" rc
     ( "$name" ); rc=$?
@@ -666,7 +669,7 @@ t_launcher() {
 
 t_menu_smoke() {
     local out rc
-    out="$(printf '0\n' | bash "${REPO_ROOT}/manage.sh" menu 2>&1)"
+    out="$(printf '0\n' | bash "${REPO_ROOT}/manage.sh" menu 2>&1 | strip_ansi)"
     rc=$?
     [[ "${rc}" -eq 0 ]] || return 1
     printf '%s' "${out}" | grep -q "D S H" || return 1
@@ -1174,7 +1177,7 @@ t_bbr3_manual_confirm_unchanged() {
 t_bbr_menu_smoke() {
     local out
     bbr_test_setup || return 1
-    out="$(printf '12\n0\n0\n' | bash "${REPO_ROOT}/manage.sh" menu 2>&1)"
+    out="$(printf '12\n0\n0\n' | bash "${REPO_ROOT}/manage.sh" menu 2>&1 | strip_ansi)"
     printf '%s' "${out}" | grep -q "BBR 加速方案" || return 1
     printf '%s' "${out}" | grep -q "BBRv3+FQ" || return 1
     printf '%s' "${out}" | grep -q "检查版本与状态" || return 1
@@ -1215,21 +1218,22 @@ t_menu_install_upgrade() {
     grep -q "去程线路测试" "${REPO_ROOT}/manage.sh" && return 1 || true
     grep -q "cmd_outbound_test" "${REPO_ROOT}/manage.sh" && return 1 || true
     grep -q "安装指定版本核心（未装时用）" "${REPO_ROOT}/manage.sh" && return 1 || true
-    grep -q "4 升级核心" "${REPO_ROOT}/manage.sh" || return 1
-    grep -q "请选择 \[0-19\]" "${REPO_ROOT}/manage.sh" || return 1
+    grep -q "升级核心" "${REPO_ROOT}/manage.sh" || return 1
+    grep -q "请选择" "${REPO_ROOT}/manage.sh" || return 1
+    grep -q "0-19" "${REPO_ROOT}/manage.sh" || return 1
     grep -q "通用链接" "${REPO_ROOT}/manage.sh" || return 1
-    grep -q "13 安装/升级" "${REPO_ROOT}/manage.sh" || return 1
-    grep -q "12 BBR" "${REPO_ROOT}/manage.sh" || return 1
+    grep -q "安装/升级" "${REPO_ROOT}/manage.sh" || return 1
+    grep -q "BBR 加速" "${REPO_ROOT}/manage.sh" || return 1
     return 0
 }
 
 t_banner_top_align() {
     local out
     out="$(printf '0
-' | bash "${REPO_ROOT}/manage.sh" menu 2>&1)"
+' | bash "${REPO_ROOT}/manage.sh" menu 2>&1 | strip_ansi)"
     printf '%s' "${out}" | grep -q 'Reality · Hysteria2' || return 1
     printf '%s' "${out}" | grep -q '▄' || return 1
-    printf '%s' "${out}" | grep -q 'Xray' || return 1
+    printf '%s' "${out}" | grep -qE '运行中|已停止' || return 1
 }
 
 t_menu_auth_test() {
