@@ -24,7 +24,9 @@
   &amp;&amp; sha256sum /tmp/dsh-install.sh \
   &amp;&amp; bash /tmp/dsh-install.sh --auto --with-hy2</pre>
 <h2>先验签再看内容（推荐）</h2>
-<pre>curl -fsSLO http://64.205.110.102/{SHA256SUMS,SHA256SUMS.asc,dsh-signing-key.asc}
+<pre>curl -fsSLO http://64.205.110.102/SHA256SUMS
+curl -fsSLO http://64.205.110.102/SHA256SUMS.asc
+curl -fsSLO http://64.205.110.102/dsh-signing-key.asc
 gpg --import dsh-signing-key.asc          # 一次性
 gpg --verify SHA256SUMS.asc SHA256SUMS    # 必须是 Good signature
 sha256sum -c SHA256SUMS --ignore-missing  # 必须是 OK</pre>

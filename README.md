@@ -28,7 +28,9 @@ Reality 走 TCP 适合下载和大流量，Hysteria2 走 UDP 适合语音、视�
 ```bash
 base=https://github.com/cc520go/dsh-deploy/releases/latest/download
 curl -fsSLO "$base/dsh-install-1.2.0.sh"
-curl -fsSLO "$base/SHA256SUMS" "$base/SHA256SUMS.asc" "$base/dsh-signing-key.asc"
+curl -fsSLO "$base/SHA256SUMS"
+curl -fsSLO "$base/SHA256SUMS.asc"
+curl -fsSLO "$base/dsh-signing-key.asc"
 gpg --import dsh-signing-key.asc
 gpg --verify SHA256SUMS.asc SHA256SUMS && sha256sum -c SHA256SUMS --ignore-missing
 bash dsh-install-1.2.0.sh --auto --with-hy2
