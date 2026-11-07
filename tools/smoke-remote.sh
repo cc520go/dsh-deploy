@@ -28,7 +28,7 @@ HY2_BIN="${HY2_BIN:-/usr/local/bin/hysteria}"
 HY2_USER="${HY2_USER:-hysteria}"
 HY2_MARKER="${HY2_MARKER:-${HY2_CONF_DIR}/.managed-by-hy2addon}"
 HY2_PORT="${HY2_PORT:-443}"
-LAUNCHER="${LAUNCHER:-/usr/local/bin/lisa}"
+LAUNCHER="${LAUNCHER:-/usr/local/bin/DSH}"
 TOOL_DIR="${TOOL_DIR:-/usr/local/share/xray-reality-manager}"
 WORK="$(mktemp -d)"
 trap 'rm -rf -- "${WORK}"' EXIT
@@ -47,7 +47,7 @@ else
     no "系统不是 Debian 12（$( . /etc/os-release 2>/dev/null; printf '%s %s' "${ID:-?}" "${VERSION_ID:-?}" )）"
 fi
 
-[[ -x "${LAUNCHER}" ]] && ok "lisa 启动器存在: ${LAUNCHER}" || no "lisa 启动器缺失"
+[[ -x "${LAUNCHER}" ]] && ok "DSH 启动器存在: ${LAUNCHER}" || no "DSH 启动器缺失"
 [[ -d "${TOOL_DIR}" ]] && ok "工具目录存在: ${TOOL_DIR}" || no "工具目录缺失: ${TOOL_DIR}"
 
 # ------------------------------------------------------------- main line ----

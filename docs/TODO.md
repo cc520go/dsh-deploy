@@ -19,6 +19,11 @@
 
 ## 踩过的坑（别再犯）
 
+- **改名要全局搜**：把启动器 `lisa` 改成 `DSH` 时，`tools/smoke-remote.sh` 里还留着
+  `LAUNCHER=/usr/local/bin/lisa`，导致验收一直报「启动器缺失」。改名后务必全仓 grep 旧名。
+- **重置会连镜像一起清掉**：686 既是测试机也是镜像站，重置后要按 `tools/mirror/README.md`
+  重装 nginx 并拷回 `dist/`（别忘了 `chmod 644/755`，否则 nginx 返回 403）。
+
 - **改了 `manage.sh` 只同步 `lib/` 是不够的**。重新跑一次安装器（`bash lisa-install-26.10.21.sh --auto`）
   会走“已安装”分支，把工具文件刷到 `/usr/local/share/…` 并重建 `DSH`/`lisa` 启动器——
   这是更新已部署机器 UI 的正确方式，不要手动 scp 单个文件。

@@ -14,6 +14,9 @@ Reality 走 TCP 适合下载和大流量，Hysteria2 走 UDP 适合语音、视�
 
 服务器：Debian 12，root 权限。
 
+> 最小化系统可能没装 `curl` / `gnupg`（下载和验签要用）：
+> `apt-get update && apt-get install -y curl gnupg`
+
 **方式一：国内镜像（推荐，不依赖 GitHub）**
 
 ```bash
