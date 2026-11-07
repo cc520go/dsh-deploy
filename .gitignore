@@ -1,4 +1,4 @@
-# xray-reality-manager .gitignore
+# DSH .gitignore
 # 原则：任何可能包含真实凭据、密钥或完整节点分享链接的文件一律不进仓库。
 
 # 私钥与证书
@@ -31,3 +31,7 @@ backups/
 
 # 快照目录（服务器上的算子备份，不进仓库）
 xray-backup-*/
+
+# 构建产物（安装器/源码包/校验文件）由 tools/build-release.sh 生成，
+# 只发 Release 和镜像，不再提交进仓库。
+dist/

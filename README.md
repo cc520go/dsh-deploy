@@ -50,7 +50,7 @@ git clone https://github.com/cc520go/dsh-deploy.git /tmp/dsh && cd /tmp/dsh && b
 
 **方式四：离线单文件（完全离线）**
 
-把 `dsh-install-<DSH版本>.sh`（Release 附件或 `dist/`）用 WinSCP / scp / 面板文件管理器上传，然后：
+把 `dsh-install-<DSH版本>.sh`（Release 附件）用 WinSCP / scp / 面板文件管理器上传，然后：
 
 ```bash
 sha256sum dsh-install-1.1.0.sh          # 与 SHA256SUMS 对比
