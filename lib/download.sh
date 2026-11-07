@@ -33,6 +33,10 @@ _DDLIB_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || ec
 source "${_DDLIB_DIR}/common.sh"
 
 INSTALLER_URL_DEFAULT="https://github.com/XTLS/Xray-install/raw/main/install-release.sh"
+# Optional mirror root (no trailing slash). When set, core zip/.dgst and
+# the official installer come from the mirror; hashes/signatures are
+# checked exactly the same way. Set by dsh-bootstrap on domestic installs.
+DSH_MIRROR_BASE="${DSH_MIRROR_BASE:-}"
 INSTALLER_PINNED_COMMIT="04e6f3bd9534811ed901a48c47b2c042dd64eb3a"
 INSTALLER_PINNED_SHA256="934ecb26ded1089f849ac238d5170f1159fe4b6ca300d4f1e67730bd41fe58cf"
 
@@ -129,7 +133,11 @@ download_core() {
     destdir="$3"
     tag="v${ver}"
     zip_name="Xray-${arch}.zip"
-    zip_url="https://github.com/XTLS/Xray-core/releases/download/${tag}/${zip_name}"
+    if [[ -n "${DSH_MIRROR_BASE}" ]]; then
+        zip_url="${DSH_MIRROR_BASE%/}/xray/${tag}/${zip_name}"
+    else
+        zip_url="https://github.com/XTLS/Xray-core/releases/download/${tag}/${zip_name}"
+    fi
     dgst_url="${zip_url}.dgst"
     zip_path="${destdir}/${zip_name}"
     dgst_path="${destdir}/${zip_name}.dgst"
@@ -156,7 +164,9 @@ download_core() {
 fetch_installer() {
     local dest="$1" size pinned_hash actual
     local url="${XRAY_INSTALLER_URL:-${INSTALLER_URL_DEFAULT}}"
-    if [[ "${INSTALLER_PINNED_COMMIT}" != "PLACEHOLDER" ]]; then
+    if [[ -n "${DSH_MIRROR_BASE}" ]]; then
+        url="${DSH_MIRROR_BASE%/}/xray/install-release.sh"
+    elif [[ "${INSTALLER_PINNED_COMMIT}" != "PLACEHOLDER" ]]; then
         url="https://github.com/XTLS/Xray-install/raw/${INSTALLER_PINNED_COMMIT}/install-release.sh"
     fi
     pinned_hash="${XRAY_INSTALLER_SHA256:-${INSTALLER_PINNED_SHA256}}"

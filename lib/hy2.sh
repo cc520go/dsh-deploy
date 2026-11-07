@@ -245,7 +245,11 @@ hy2_ensure_user() {
 # hy2_download_binary <version> <arch>: download + SHA256 verify, install to HY2_BIN.
 hy2_download_binary() {
     local ver="$1" arch="$2" url tmp want got
-    url="https://github.com/HyNetworks/hysteria/releases/download/app/v${ver#v}/hysteria-linux-${arch}"
+    if [[ -n "${DSH_MIRROR_BASE:-}" ]]; then
+        url="${DSH_MIRROR_BASE%/}/hysteria/v${ver#v}/hysteria-linux-${arch}"
+    else
+        url="https://github.com/HyNetworks/hysteria/releases/download/app/v${ver#v}/hysteria-linux-${arch}"
+    fi
     want="$(hy2_sha_for_arch "${arch}")"
     if [[ -z "${want}" ]]; then
         die "versions-hy2.conf 里没有 SHA256_linux_${arch}，拒绝安装未知架构/未钉死版本。"

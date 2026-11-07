@@ -2,6 +2,15 @@
 
 记录 DSH 脚本自身的版本；Xray 核心版本见 `VERSION`。
 
+## 1.3.0 — 2026-11-08
+
+### 新增
+
+- 国内镜像支持：设置 `DSH_MIRROR_BASE` 后，Xray 核心 zip/.dgst、官方
+  `install-release.sh`、Hysteria2 二进制全部从镜像获取，原有 SHA256 校验不变。
+- `env_check` 在镜像模式下检查镜像可达性，不再要求能连 GitHub。
+- 新增 `tools/dsh-bootstrap.sh` 一键入口：自动装依赖、验签、校验安装器哈希。
+
 ## 1.2.0 — 2026-11-07
 
 ### 变更

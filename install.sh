@@ -222,22 +222,26 @@ _check_github_network() {
         log_info "test mode: GitHub network check skipped (set XRAY_TEST_NETWORK_CHECK=1 to force it)."
         return 0
     fi
-    local url="${ENV_GITHUB_URL}"
+    local url="${ENV_GITHUB_URL}" label="GitHub Releases"
+    if [[ -n "${DSH_MIRROR_BASE:-}" ]]; then
+        url="${DSH_MIRROR_BASE%/}/SHA256SUMS"
+        label="install mirror"
+    fi
     if command -v curl >/dev/null 2>&1; then
         if curl -fsSI --max-time 15 "${url}" >/dev/null 2>&1; then
-            log_info "GitHub Releases reachable: ${url}"
+            log_info "${label} reachable: ${url}"
             return 0
         fi
     elif command -v wget >/dev/null 2>&1; then
         if wget --spider -q --timeout=15 "${url}" >/dev/null 2>&1; then
-            log_info "GitHub Releases reachable: ${url}"
+            log_info "${label} reachable: ${url}"
             return 0
         fi
     else
-        die "neither curl nor wget is available for the GitHub network check (tools should have been installed above)."
+        die "neither curl nor wget is available for the network check (tools should have been installed above)."
         return 1
     fi
-    die "cannot reach GitHub Releases (${url}); check network, DNS and proxy, then rerun install."
+    die "cannot reach ${label} (${url}); check network, DNS and proxy, then rerun install."
     return 1
 }
 
