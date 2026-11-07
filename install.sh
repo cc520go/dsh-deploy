@@ -592,7 +592,7 @@ node_setup() {
     return 0
 }
 
-# print_share_link: prints the SimpleXray share link (stdout only) when
+# print_share_link: prints the DSH-Reality share link (stdout only) when
 # node params exist; prints nothing otherwise. Never logged to a file.
 print_share_link() {
     local uuid host port flow sni pub sid
@@ -604,8 +604,8 @@ print_share_link() {
     pub="$(read_node_param public_key)"
     sid="$(read_node_param shortid)"
     if [[ -n "${uuid}" && -n "${host}" && -n "${port}" && -n "${sni}" && -n "${pub}" && -n "${sid}" ]]; then
-        printf 'SimpleXray share link (copy it into your client; do not share it publicly):\n'
-        build_share_link "${uuid}" "${host}" "${port}" "${flow}" "${sni}" "${pub}" "${sid}" "xray-reality-manager"
+        printf 'DSH-Reality 链接（复制到 V2rayNG 导入；不要公开发送）：\n'
+        build_share_link "${uuid}" "${host}" "${port}" "${flow}" "${sni}" "${pub}" "${sid}" "DSH-Reality"
         printf '\n'
     fi
     return 0
@@ -636,7 +636,7 @@ verify_fresh_install() {
 # ask, but a fallback host must not look identical to a verified one.
 print_unverified_host_note() {
     if [[ "${HOST_IP_UNVERIFIED:-0}" == "1" ]]; then
-        printf '注意：本次 host 未经多源交叉验证，请先用 SimpleXray 连一次确认；若连不上，用 XRAY_NODE_HOST=正确地址 重新一键安装。\n'
+        printf '注意：本次 host 未经多源交叉验证，请先用客户端连一次确认；若连不上，用 XRAY_NODE_HOST=正确地址 重新一键安装。\n'
     fi
     return 0
 }

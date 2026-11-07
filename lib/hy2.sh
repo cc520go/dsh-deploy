@@ -484,7 +484,7 @@ hy2_selfcheck() {
 
 # hy2_build_link <password> <host> <pin>: hysteria2:// for V2rayNG.
 hy2_build_link() {
-    local pw="$1" host="$2" pin="$3" name="Lisa-HY2"
+    local pw="$1" host="$2" pin="$3" name="DSH-HY2"
     printf 'hysteria2://%s@%s:%s/?sni=%s&pinSHA256=%s#%s' \
         "$(url_encode "${pw}")" "${host}" "${HY2_PORT}" \
         "$(url_encode "${HY2_SNI}")" "${pin}" "${name}"

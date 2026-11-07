@@ -9,7 +9,7 @@
 #
 # Slim menu (menu 1 changed 2026-11-03, C approved in main chat):
 #   1  system security: change auth method (password off, key login on)  7  node config management
-#   2  view current core version               8  SimpleXray share link
+#   2  view current core version               8  DSH-Reality share link
 #   3  check official updates                  9  config + service status
 #   4  manual core upgrade                    10  line diagnostics
 #   5  rollback to latest snapshot            11  logs
@@ -66,11 +66,14 @@ usage() {
 }
 
 banner() {
-    local xray_state hy2_state
-    xray_state="$(service_display_state "$(read_node_param port)")"
-    xray_state="${xray_state%%$'\n'*}"
-    hy2_state="$(hy2_service_state)"
+    local ver xr hy2
+    ver="$(current_version)"
+    xr="$(service_display_state "$(read_node_param port)")"
+    xr="${xr%%$'\n'*}"
+    hy2="$(hy2_service_state)"
+
     printf '\n'
+    printf '  \033[90m══════════════════════════════════════\033[0m\n'
     printf '\033[36m'
     cat <<'EOF'
    ▄▄▄▄▄▄▄▄▄▄▄
@@ -79,12 +82,22 @@ banner() {
    ▀▀▀▀▀▀▀▀▀▀▀      ▀
 EOF
     printf '\033[0m'
-    printf '  Reality · Hysteria2\n'
-    printf '  Xray %-9s Reality %-9s HY2 %s\n' \
-        "$(current_version)" "${xray_state}" "${hy2_state}"
-    printf '  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n'
+    printf '  \033[36mReality\033[0m · \033[36mHysteria2\033[0m'
+    printf '                    \033[90mv%s\033[0m\n' "${ver}"
+    printf '  \033[90m══════════════════════════════════════\033[0m\n'
+    if [[ "${xr}" == "active" ]]; then
+        printf '   Reality \033[32m●\033[0m \033[32m运行中\033[0m'
+    else
+        printf '   Reality \033[31m○\033[0m \033[31m已停止\033[0m'
+    fi
+    if [[ "${hy2}" == "active" ]]; then
+        printf '     HY2 \033[32m●\033[0m \033[32m运行中\033[0m\n'
+    else
+        printf '     HY2 \033[31m○\033[0m \033[31m已停止\033[0m\n'
+    fi
     printf '\n'
 }
+
 
 # ------------------------------------------------------------ commands ----
 cmd_status() {
@@ -311,8 +324,8 @@ node_share() {
         die "node params incomplete; run 'node init' or install a fresh node first."
         return 1
     fi
-    printf 'SimpleXray share link (stdout only; do not share it publicly):\n'
-    build_share_link "${uuid}" "${host}" "${port}" "${flow}" "${sni}" "${pub}" "${sid}" "xray-reality-manager"
+    printf 'DSH-Reality 链接（仅本终端显示；不要公开发送）：\n'
+    build_share_link "${uuid}" "${host}" "${port}" "${flow}" "${sni}" "${pub}" "${sid}" "DSH-Reality"
     printf '\n'
     return 0
 }
@@ -862,27 +875,30 @@ bbr_menu() {
 }
 
 menu() {
-    local choice
+    local choice ns
+    local rule='\033[90m┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\033[0m'
+    local y='\033[33m' r='\033[0m'
     while true; do
         banner
-        printf '  ▸ 系统\n'
-        printf '   1 认证方式      2 核心版本\n'
-        printf '   3 检查更新      4 升级核心\n'
-        printf '   5 回滚快照      6 备份快照\n'
-        printf '   7 节点配置      8 通用链接\n'
-        printf '  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n'
-        printf '  ▸ 运维\n'
-        printf '   9 状态检查     10 线路诊断\n'
-        printf '  11 查看日志     12 BBR 加速\n'
-        printf '  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n'
-        printf '  ▸ Hysteria2（附加协议）\n'
-        printf '  13 安装/升级    14 卸载\n'
-        printf '  15 查看链接     16 状态/重启\n'
-        printf '  17 日志         18 轮换证书\n'
-        printf '  19 一键体检\n'
-        printf '  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄\n'
-        printf '   0 退出\n'
-        printf '请选择 [0-19]: '
+        printf "  ${rule}\n"
+        printf '  \033[1;36m系统\033[0m\n'
+        printf "   ${y}%2s${r} 认证方式     ${y}%2s${r} 核心版本\n" 1 2
+        printf "   ${y}%2s${r} 检查更新     ${y}%2s${r} 升级核心\n" 3 4
+        printf "   ${y}%2s${r} 回滚快照     ${y}%2s${r} 备份快照\n" 5 6
+        printf "   ${y}%2s${r} 节点配置     ${y}%2s${r} 通用链接\n" 7 8
+        printf "  ${rule}\n"
+        printf '  \033[1;36m运维\033[0m\n'
+        printf "   ${y}%2s${r} 状态检查     ${y}%2s${r} 线路诊断\n" 9 10
+        printf "   ${y}%2s${r} 查看日志     ${y}%2s${r} BBR 加速\n" 11 12
+        printf "  ${rule}\n"
+        printf '  \033[1;36mHysteria2\033[0m \033[90m附加协议\033[0m\n'
+        printf "   ${y}%2s${r} 安装/升级    ${y}%2s${r} 卸载\n" 13 14
+        printf "   ${y}%2s${r} 查看链接     ${y}%2s${r} 状态/重启\n" 15 16
+        printf "   ${y}%2s${r} 日志         ${y}%2s${r} 轮换证书\n" 17 18
+        printf "   ${y}%2s${r} 一键体检\n" 19
+        printf "  ${rule}\n"
+        printf "   ${y}%2s${r} \033[90m退出\033[0m\n" 0
+        printf '  \033[36m请选择\033[0m [0-19]: '
         read -r choice || return 0
         case "${choice}" in
             1) cmd_auth ;;
@@ -893,7 +909,6 @@ menu() {
             6) cmd_backup ;;
             7)
                 printf '节点操作：show/init/share/sni/restore-main: '
-                local ns
                 read -r ns || ns=""
                 cmd_node "${ns:-show}"
                 ;;
@@ -920,7 +935,6 @@ menu() {
         read -r _dummy || true
     done
 }
-
 main() {
     local cmd="${1:-menu}"
     shift || true

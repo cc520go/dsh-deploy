@@ -89,8 +89,8 @@ NODE_PARAMS_FILE="${NODE_PARAMS_FILE:-/root/.xray-reality-manager/node.params}"
 # Menu launcher directory (default /usr/local/bin, so `lisa` is on PATH).
 LAUNCHER_DIR="${LAUNCHER_DIR:-/usr/local/bin}"
 LAUNCHER_NAME="DSH"
-# 兼容旧命令：仍然保留 lisa 别名（老文档/老机器上可能在用）
-LAUNCHER_COMPAT_NAME="lisa"
+# 旧命令 lisa 已废弃：安装时如果发现它指向本工具，顺手清掉。
+LEGACY_LAUNCHER_NAME="lisa"
 # Persistent home for the installed tool (default /usr/local/share/...).
 # The launcher points here, never at the download dir (e.g. /tmp/xrm),
 # so the menu survives /tmp cleanups and reboots.
@@ -415,6 +415,14 @@ install_lisa_launcher() {
         die "refusing to overwrite existing non-link file: ${link} (remove it manually if you really want the '${LAUNCHER_NAME}' launcher there)."
         return 1
     fi
+    # 迁移：旧版本装过 lisa 软链，这里删掉它（只删指向本工具的软链，
+    # 绝不动同名的真实文件）。放在函数早段，保证“已安装”分支也会执行。
+    if [[ -n "${LEGACY_LAUNCHER_NAME}" && "${LEGACY_LAUNCHER_NAME}" != "${LAUNCHER_NAME}" ]]; then
+        local legacy="${LAUNCHER_DIR}/${LEGACY_LAUNCHER_NAME}"
+        if [[ -L "${legacy}" && "$(readlink "${legacy}")" == "${persist_target}" ]]; then
+            rm -f -- "${legacy}" && log_info "removed legacy launcher: ${legacy}"
+        fi
+    fi
     mkdir -p "${persist_dir}/lib" || { die "cannot create tool dir: ${persist_dir}"; return 1; }
     if [[ "${target}" != "${persist_target}" ]]; then
         compgen -G "${src_dir}/lib/*.sh" > /dev/null || { die "no lib files in source dir: ${src_dir}/lib"; return 1; }
@@ -454,14 +462,6 @@ install_lisa_launcher() {
         log_warn "launcher ${link} currently points at ${cur}; repointing to ${persist_target}."
     fi
     ln -sfn "${persist_target}" "${link}" || { die "failed to create launcher link: ${link}"; return 1; }
-    # Compatibility alias: keep the old command working, but never clobber
-    # a real file that happens to sit there.
-    if [[ -n "${LAUNCHER_COMPAT_NAME}" && "${LAUNCHER_COMPAT_NAME}" != "${LAUNCHER_NAME}" ]]; then
-        local compat="${LAUNCHER_DIR}/${LAUNCHER_COMPAT_NAME}"
-        if [[ ! -e "${compat}" || -L "${compat}" ]]; then
-            ln -sfn "${persist_target}" "${compat}" 2>/dev/null || true
-        fi
-    fi
     log_info "launcher installed: type '${LAUNCHER_NAME}' to open the menu."
     return 0
 }
