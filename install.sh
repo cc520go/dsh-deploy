@@ -374,7 +374,14 @@ install_logrotate_config() {
         log_warn "logrotate config source not found (${src}); skipping log rotation install."
         return 0
     fi
-    if command -v logrotate >/dev/null 2>&1; then
+    # 测试开关：测试机往往本身就装了 logrotate，走不到“缺失时自动安装”
+    # 那条分支。这个变量只在 XRAY_TEST_MODE=1 下生效，生产环境无效。
+    local lr_present=0
+    command -v logrotate >/dev/null 2>&1 && lr_present=1
+    if [[ "${XRAY_TEST_MODE:-0}" == "1" && "${LOGROTATE_TEST_FORCE_MISSING:-0}" == "1" ]]; then
+        lr_present=0
+    fi
+    if [[ "${lr_present}" -eq 1 ]]; then
         _install_logrotate_rule "${src}" "${dest}"
         return 0
     fi

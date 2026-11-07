@@ -1679,6 +1679,7 @@ t_logrotate_smart_install_apt_success() {
     export PATH="${d}/bin:${PATH}"
     export LOGROTATE_DIR="${d}/lr"
     export LOGROTATE_TEST_APT_CMD="${d}/fake-apt"
+    export LOGROTATE_TEST_FORCE_MISSING=1   # 测试机可能自带 logrotate，强制走“缺失”分支
     local out
     out="$(install_logrotate_config 2>&1)" || return 1
     printf '%s' "${out}" | grep -q "机器上没有 logrotate，现在帮你装一个" || return 1
@@ -1699,6 +1700,7 @@ t_logrotate_smart_install_apt_failure() {
     export PATH="${d}/bin:${PATH}"
     export LOGROTATE_DIR="${d}/lr"
     export LOGROTATE_TEST_APT_CMD="${d}/fake-apt"
+    export LOGROTATE_TEST_FORCE_MISSING=1   # 同上
     local out rc
     out="$(install_logrotate_config 2>&1)"; rc=$?
     [[ "${rc}" -eq 0 ]] || return 1
