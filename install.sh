@@ -420,18 +420,25 @@ install_logrotate_config() {
         return 0
     fi
     log_info "机器上没有 logrotate，现在帮你装一个"
-    local apt_ok=0
+    local apt_ok=0 apt_log
+    apt_log="$(mktemp)"
     if command -v timeout >/dev/null 2>&1; then
-        timeout 300 apt-get update -qq >/dev/null 2>&1 || log_warn "apt-get update failed; trying logrotate install from existing apt cache."
-        timeout 300 apt-get install -y logrotate >/dev/null 2>&1 && apt_ok=1 || true
+        timeout 300 apt-get update -qq >"${apt_log}" 2>&1 \
+            || log_warn "apt-get update 失败：$(tail -n 2 "${apt_log}" | tr '\n' ' ')"
+        timeout 300 apt-get install -y logrotate >"${apt_log}" 2>&1 && apt_ok=1 || true
     else
-        apt-get update -qq >/dev/null 2>&1 || log_warn "apt-get update failed; trying logrotate install from existing apt cache."
-        apt-get install -y logrotate >/dev/null 2>&1 && apt_ok=1 || true
+        apt-get update -qq >"${apt_log}" 2>&1 \
+            || log_warn "apt-get update 失败：$(tail -n 2 "${apt_log}" | tr '\n' ' ')"
+        apt-get install -y logrotate >"${apt_log}" 2>&1 && apt_ok=1 || true
     fi
     if [[ "${apt_ok}" -ne 1 ]] || ! command -v logrotate >/dev/null 2>&1; then
-        log_warn "logrotate install failed; skipping log rotation install (Xray install continues)."
+        # 把真实原因打出来：以前全丢进 /dev/null，用户只看到“失败”，无从下手。
+        log_warn "logrotate 安装失败，apt 报错：$(tail -n 3 "${apt_log}" | tr '\n' ' ')"
+        log_warn "日志轮转先跳过（不影响节点）。修好 apt 后重跑安装即可补上。"
+        rm -f -- "${apt_log}"
         return 0
     fi
+    rm -f -- "${apt_log}"
     _install_logrotate_rule "${src}" "${dest}"
     return 0
 }
