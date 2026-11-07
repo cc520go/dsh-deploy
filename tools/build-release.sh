@@ -1,22 +1,20 @@
 #!/usr/bin/env bash
 #
-# tools/build-release.sh — build distributable artifacts for
-# xray-reality-manager.
+# tools/build-release.sh — build distributable artifacts for DSH.
 #
 # Produces, under dist/:
-#   lisa-<version>.tar.gz      plain source bundle (clone-and-run style)
-#   lisa-install-<version>.sh  single self-contained file: payload +
-#                              checksum + unpack + run install.sh
-#   SHA256SUMS                 checksums of the two artifacts above
+#   dsh-<dsh-version>.tar.gz      plain source bundle (clone-and-run style)
+#   dsh-install-<dsh-version>.sh  single self-contained installer
+#   dsh-install.sh                stable alias for the current installer
+#   lisa-install.sh               legacy compatibility alias
+#   SHA256SUMS / SHA256SUMS.asc   checksums and detached signature
 #
-# Why the single file exists: the project must be installable on a
-# machine with no GitHub access, by a person with no help. Upload one
-# file with scp/WinSCP, run one command. Nothing is fetched to bootstrap.
+# The DSH script version (DSH_VERSION) is deliberately separate from the
+# Xray core version (VERSION). The installer still installs the core version
+# pinned in VERSION; only the release/branding filename uses DSH_VERSION.
 #
 # Usage:
-#   tools/build-release.sh [--with-tests] [--no-sign] [version]
-#
-# The version defaults to the VERSION file's content.
+#   tools/build-release.sh [--with-tests] [--no-sign] [dsh-version]
 
 set -euo pipefail
 
@@ -36,8 +34,12 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-VERSION="${1:-$(tr -d '[:space:]' < "${REPO_ROOT}/VERSION")}"
-NAME="lisa-${VERSION}"
+DSH_VERSION="${1:-$(tr -d '[:space:]' < "${REPO_ROOT}/DSH_VERSION")}"
+DSH_CODENAME="$(tr -d '[:space:]' < "${REPO_ROOT}/DSH_CODENAME")"
+CORE_VERSION="$(tr -d '[:space:]' < "${REPO_ROOT}/VERSION")"
+[[ -n "${DSH_VERSION}" ]] || { printf '[FAIL] DSH_VERSION is empty\n' >&2; exit 1; }
+[[ -n "${CORE_VERSION}" ]] || { printf '[FAIL] VERSION is empty\n' >&2; exit 1; }
+NAME="dsh-${DSH_VERSION}"
 STAGE="$(mktemp -d)"
 cleanup() { rm -rf -- "${STAGE}"; }
 trap cleanup EXIT
@@ -50,6 +52,7 @@ for f in "${REPO_ROOT}"/install.sh "${REPO_ROOT}"/manage.sh "${REPO_ROOT}"/diagn
     bash -n "${f}" || fail "syntax error: ${f}"
 done
 info "syntax ok"
+info "dsh ${DSH_VERSION}「${DSH_CODENAME}」 core ${CORE_VERSION}"
 
 if command -v shellcheck >/dev/null 2>&1; then
     # Warnings only: the existing tree still has a few pre-existing ones.
@@ -75,8 +78,8 @@ copy_item() {
     [[ -e "${REPO_ROOT}/${rel}" ]] || fail "missing: ${rel}"
     cp -a "${REPO_ROOT}/${rel}" "${STAGE}/${NAME}/${rel}"
 }
-for item in install.sh manage.sh diagnose.sh VERSION versions-hy2.conf \
-            README.md LICENSE lib docs logrotate tests; do
+for item in install.sh manage.sh diagnose.sh VERSION DSH_VERSION DSH_CODENAME \
+            versions-hy2.conf README.md LICENSE lib docs logrotate tests; do
     copy_item "${item}"
 done
 
@@ -87,37 +90,41 @@ cp "${REPO_ROOT}/tools/smoke-remote.sh" "${STAGE}/${NAME}/smoke-remote.sh" \
 rm -rf "${STAGE}/${NAME}/dist" 2>/dev/null || true
 
 mkdir -p "${DIST}"
+# Remove stale Lisa/DSH artifacts so dist only contains this build.
+rm -f "${DIST}"/lisa-*.tar.gz "${DIST}"/lisa-install-*.sh "${DIST}"/dsh-*.tar.gz \
+      "${DIST}"/dsh-install-*.sh "${DIST}"/dsh-install.sh "${DIST}"/lisa-install.sh
 TARBALL="${DIST}/${NAME}.tar.gz"
 tar -czf "${TARBALL}" -C "${STAGE}" "${NAME}"
 info "built $(basename "${TARBALL}") ($(du -h "${TARBALL}" | cut -f1))"
 
 # --------------------------------------------------- single-file installer ----
 PAYLOAD_SHA="$(sha256sum "${TARBALL}" | cut -d' ' -f1)"
-SELF="${DIST}/lisa-install-${VERSION}.sh"
+SELF="${DIST}/dsh-install-${DSH_VERSION}.sh"
 HEAD="${STAGE}/self-head.sh"
 
 cat > "${HEAD}" <<'HEADER'
 #!/usr/bin/env bash
 #
-# lisa-install — self-contained installer for xray-reality-manager.
+# dsh-install — self-contained installer for DSH.
 #
 # No network access is needed to unpack this: the whole project is
 # embedded below as a base64 tar.gz. Verify it, unpack it, run install.sh.
 #
 # Usage:
-#   bash lisa-install-<version>.sh [--check|--auto|--help] [version]
+#   bash dsh-install-<version>.sh [--check|--auto|--help] [core-version]
 #
 # Offline flow:
 #   1. upload this one file to the server (scp / WinSCP / panel file manager)
-#   2. bash lisa-install-<version>.sh
+#   2. bash dsh-install-<version>.sh
 #
 set -euo pipefail
 
-RELEASE_VERSION="__VERSION__"
+RELEASE_VERSION="__DSH_VERSION__"
+RELEASE_CODENAME="__CODENAME__"
 PAYLOAD_SHA256="__SHA__"
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-    sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,21p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
     exit 0
 fi
 
@@ -132,12 +139,12 @@ done
 WORK="$(mktemp -d)"
 trap 'rm -rf -- "${WORK}"' EXIT
 
-printf '[INFO] lisa-install %s：解包中 ...\n' "${RELEASE_VERSION}" >&2
-base64 -d > "${WORK}/payload.tar.gz" <<'__LISA_PAYLOAD__'
+printf '[INFO] dsh-install %s「%s」：解包中 ...\n' "${RELEASE_VERSION}" "${RELEASE_CODENAME}" >&2
+base64 -d > "${WORK}/payload.tar.gz" <<'__DSH_PAYLOAD__'
 HEADER
 
 cat > "${STAGE}/self-tail.sh" <<'TAIL'
-__LISA_PAYLOAD__
+__DSH_PAYLOAD__
 
 printf '%s  %s\n' "${PAYLOAD_SHA256}" "${WORK}/payload.tar.gz" | sha256sum -c - >/dev/null 2>&1 \
     || { printf '[FAIL] 安装包校验失败：文件可能传坏了或被人改过，拒绝执行。\n' >&2; exit 1; }
@@ -153,11 +160,13 @@ bash ./install.sh "$@"
 rc=$?
 set -e
 # The unpacked tree is temporary: install.sh copies what it needs into
-# TOOL_INSTALL_DIR and installs the `lisa` launcher.
+# TOOL_INSTALL_DIR and installs the DSH launcher.
 exit "${rc}"
 TAIL
 
-sed -e "s|__VERSION__|${VERSION}|g" -e "s|__SHA__|${PAYLOAD_SHA}|g" "${HEAD}" > "${SELF}"
+sed -e "s|__DSH_VERSION__|${DSH_VERSION}|g" \
+    -e "s|__CODENAME__|${DSH_CODENAME}|g" \
+    -e "s|__SHA__|${PAYLOAD_SHA}|g" "${HEAD}" > "${SELF}"
 base64 "${TARBALL}" >> "${SELF}"
 sed -e "s|__NAME__|${NAME}|g" "${STAGE}/self-tail.sh" >> "${SELF}"
 chmod 755 "${SELF}"
@@ -168,10 +177,13 @@ info "built $(basename "${SELF}") ($(du -h "${SELF}" | cut -f1))"
 (
     cd "${DIST}"
     sha256sum "$(basename "${TARBALL}")" "$(basename "${SELF}")" > SHA256SUMS
-    # 稳定别名 lisa-install.sh 与版本文件同内容，同一个哈希也写进去，
-    # 这样用户下别名文件也能用 sha256sum -c 校验（否则会“no file was verified”）。
+    # Stable aliases share the versioned installer's bytes. dsh-install.sh is
+    # the new name; lisa-install.sh remains for old links during migration.
     alias_hash="$(sha256sum "$(basename "${SELF}")" | cut -d' ' -f1)"
+    printf '%s  %s\n' "${alias_hash}" "dsh-install.sh" >> SHA256SUMS
     printf '%s  %s\n' "${alias_hash}" "lisa-install.sh" >> SHA256SUMS
+    cp -f "$(basename "${SELF}")" dsh-install.sh
+    cp -f "$(basename "${SELF}")" lisa-install.sh
 )
 info "wrote dist/SHA256SUMS"
 

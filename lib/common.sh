@@ -115,7 +115,28 @@ default_version() {
     if [[ -f "${vf}" ]]; then
         tr -d '[:space:]' < "${vf}"
     else
-        printf '26.10.21'
+        printf '26.10.31'
+    fi
+}
+
+# DSH release identity: deliberately separate from the Xray core version.
+dsh_release_version() {
+    local vf
+    vf="$(dirname "${_LIB_DIR}")/DSH_VERSION"
+    if [[ -f "${vf}" ]]; then
+        tr -d '[:space:]' < "${vf}"
+    else
+        printf 'unknown'
+    fi
+}
+
+dsh_release_codename() {
+    local vf
+    vf="$(dirname "${_LIB_DIR}")/DSH_CODENAME"
+    if [[ -f "${vf}" ]]; then
+        tr -d '[:space:]' < "${vf}"
+    else
+        printf 'unknown'
     fi
 }
 
@@ -449,6 +470,13 @@ install_lisa_launcher() {
         cp "${src_dir}/lib/"*.sh "${persist_dir}/lib/" || { die "cannot install lib files"; return 1; }
         if [[ -f "${src_dir}/VERSION" ]]; then
             cp "${src_dir}/VERSION" "${persist_dir}/VERSION" || { die "cannot install VERSION"; return 1; }
+        fi
+        # DSH release identity travels with the tool; VERSION stays the core.
+        if [[ -f "${src_dir}/DSH_VERSION" ]]; then
+            cp "${src_dir}/DSH_VERSION" "${persist_dir}/DSH_VERSION" 2>/dev/null || true
+        fi
+        if [[ -f "${src_dir}/DSH_CODENAME" ]]; then
+            cp "${src_dir}/DSH_CODENAME" "${persist_dir}/DSH_CODENAME" 2>/dev/null || true
         fi
         # Pinned add-on versions live in a separate file; without it the
         # HY2 module refuses to install (by design), so it must travel with

@@ -15,12 +15,12 @@
 </head>
 <body>
 <h1>DSH 一键部署 · 下载</h1>
-<p class="muted">Debian 12：VLESS + Reality 主线，可选 Hysteria2 附加协议。</p>
+<p class="muted">DSH 1.0.0「鲸潮」· 核心 Xray 26.10.31 · Debian 12：VLESS + Reality 主线，可选 Hysteria2 附加协议。</p>
 
 <h2>一条命令安装</h2>
-<pre>curl -fsSL http://64.205.110.102/lisa-install.sh -o /tmp/lisa-install.sh \
-  &amp;&amp; sha256sum /tmp/lisa-install.sh \
-  &amp;&amp; bash /tmp/lisa-install.sh --auto --with-hy2</pre>
+<pre>curl -fsSL http://64.205.110.102/dsh-install.sh -o /tmp/dsh-install.sh \
+  &amp;&amp; sha256sum /tmp/dsh-install.sh \
+  &amp;&amp; bash /tmp/dsh-install.sh --auto --with-hy2</pre>
 <h2>先验签再看内容（推荐）</h2>
 <pre>curl -fsSLO http://64.205.110.102/{SHA256SUMS,SHA256SUMS.asc,dsh-signing-key.asc}
 gpg --import dsh-signing-key.asc          # 一次性
@@ -30,9 +30,9 @@ sha256sum -c SHA256SUMS --ignore-missing  # 必须是 OK</pre>
 
 <h2>文件</h2>
 <ul>
-  <li><a href="lisa-install.sh">lisa-install.sh</a> —— 当前版本的单文件安装器（自校验）</li>
-  <li><a href="lisa-install-26.10.31.sh">lisa-install-26.10.31.sh</a> —— 固定版本</li>
-  <li><a href="lisa-26.10.31.tar.gz">lisa-26.10.31.tar.gz</a> —— 完整源码包</li>
+  <li><a href="dsh-install.sh">dsh-install.sh</a> —— 当前版本的单文件安装器（自校验）</li>
+  <li><a href="dsh-install-1.0.0.sh">dsh-install-1.0.0.sh</a> —— 固定版本</li>
+  <li><a href="dsh-1.0.0.tar.gz">dsh-1.0.0.tar.gz</a> —— 完整源码包</li>
   <li><a href="smoke-remote.sh">smoke-remote.sh</a> —— 装完的自检清单</li>
   <li><a href="SHA256SUMS">SHA256SUMS</a> · <a href="SHA256SUMS.asc">SHA256SUMS.asc</a>（签名）</li>
   <li><a href="dsh-signing-key.asc">dsh-signing-key.asc</a>（公钥）</li>
@@ -40,7 +40,7 @@ sha256sum -c SHA256SUMS --ignore-missing  # 必须是 OK</pre>
 
 <h2>装完以后</h2>
 <pre>bash smoke-remote.sh          # 一条命令给出 PASS/FAIL 结论
-DSH                           # 打开菜单（旧命令 lisa 仍可用）</pre>
+DSH                           # 打开菜单</pre>
 <p class="muted">源码仓库：<a href="https://github.com/cc520go/dsh-deploy">github.com/cc520go/dsh-deploy</a></p>
 </body>
 </html>

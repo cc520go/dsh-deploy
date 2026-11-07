@@ -69,8 +69,10 @@ usage() {
 }
 
 banner() {
-    local ver xr hy2
+    local ver rel codename xr hy2
     ver="$(current_version)"
+    rel="$(dsh_release_version)"
+    codename="$(dsh_release_codename)"
     xr="$(service_display_state "$(read_node_param port)")"
     xr="${xr%%$'\n'*}"
     hy2="$(hy2_service_state)"
@@ -86,7 +88,15 @@ banner() {
 EOF
     printf '\033[0m'
     printf '  \033[36mReality\033[0m · \033[36mHysteria2\033[0m'
-    printf '                    \033[90mv%s\033[0m\n' "${ver}"
+    if [[ "${rel}" != "unknown" ]]; then
+        if [[ "${codename}" != "unknown" ]]; then
+            printf '       \033[90mDSH %s「%s」\033[0m\n' "${rel}" "${codename}"
+        else
+            printf '       \033[90mDSH %s\033[0m\n' "${rel}"
+        fi
+    else
+        printf '                    \033[90mv%s\033[0m\n' "${ver}"
+    fi
     printf '  \033[90m══════════════════════════════════════\033[0m\n'
     if [[ "${xr}" == "active" ]]; then
         printf '   Reality \033[32m●\033[0m \033[32m运行中\033[0m'
@@ -134,6 +144,7 @@ cmd_install() {
 }
 
 cmd_version() {
+    printf 'dsh: %s「%s」\n' "$(dsh_release_version)" "$(dsh_release_codename)"
     printf 'current: %s\n' "$(current_version)"
     printf 'default: %s\n' "$(default_version)"
     return 0

@@ -6,6 +6,8 @@ Debian 12 专用的一键部署脚本。主线是 **VLESS + Reality（TCP 443）
 **Hysteria2（UDP 443）** 作为第二个协议。两条协议、两个服务、两个端口，互不干扰：
 Reality 走 TCP 适合下载和大流量，Hysteria2 走 UDP 适合语音、视频通话这类实时流量。
 
+当前版本：**DSH 1.0.0「鲸潮」**，核心 **Xray 26.10.31**。脚本版本与核心版本分开，发布物统一为 `dsh-*` 命名；旧的 `lisa-install.sh` 只保留兼容别名。
+
 一条命令装完，之后所有操作都在菜单里，不需要记命令、也不需要 AI 在旁边。
 
 ---
@@ -23,9 +25,9 @@ Reality 走 TCP 适合下载和大流量，Hysteria2 走 UDP 适合语音、视�
 **方式一：国内镜像（推荐，不依赖 GitHub）**
 
 ```bash
-curl -fsSL http://64.205.110.102/lisa-install.sh -o /tmp/lisa-install.sh
-sha256sum /tmp/lisa-install.sh          # 对比 SHA256SUMS
-bash /tmp/lisa-install.sh --auto --with-hy2
+curl -fsSL http://64.205.110.102/dsh-install.sh -o /tmp/dsh-install.sh
+sha256sum /tmp/dsh-install.sh          # 对比 SHA256SUMS
+bash /tmp/dsh-install.sh --auto --with-hy2
 ```
 
 **方式二：从源码安装（服务器能访问 GitHub）**
@@ -36,11 +38,11 @@ git clone https://github.com/cc520go/dsh-deploy.git /tmp/dsh && cd /tmp/dsh && b
 
 **方式三：离线单文件（完全离线）**
 
-把 `lisa-install-<版本>.sh`（Release 附件或 `dist/`）用 WinSCP / scp / 面板文件管理器上传，然后：
+把 `dsh-install-<DSH版本>.sh`（Release 附件或 `dist/`）用 WinSCP / scp / 面板文件管理器上传，然后：
 
 ```bash
-sha256sum lisa-install-26.10.31.sh      # 与 SHA256SUMS 对比
-bash lisa-install-26.10.31.sh --auto --with-hy2
+sha256sum dsh-install-1.0.0.sh          # 与 SHA256SUMS 对比
+bash dsh-install-1.0.0.sh --auto --with-hy2
 ```
 
 ### 验证发布物（推荐，30 秒）
@@ -133,9 +135,9 @@ DSH status | version | check-update | backup | diag | logs | share
 GitHub 在国内经常连不上，可以在自己的机器上放一份静态镜像：
 
 ```bash
-curl -fsSL http://<你的地址>/lisa-install.sh -o /tmp/lisa-install.sh
-sha256sum /tmp/lisa-install.sh
-bash /tmp/lisa-install.sh --auto --with-hy2
+curl -fsSL http://<你的地址>/dsh-install.sh -o /tmp/dsh-install.sh
+sha256sum /tmp/dsh-install.sh
+bash /tmp/dsh-install.sh --auto --with-hy2
 ```
 
 部署方法见 `tools/mirror/README.md`（nginx，只提供 GET/HEAD，不含任何凭据）。
