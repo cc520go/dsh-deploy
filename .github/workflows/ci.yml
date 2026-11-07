@@ -85,7 +85,8 @@ jobs:
           git push -f origin ci-log
 
       - name: 打包（单文件安装器 + 校验和）
-        run: bash tools/build-release.sh
+        # CI 里没有签名私钥；构建用 --no-sign，正式发布在本地签。
+        run: bash tools/build-release.sh --no-sign
 
       - name: 上传发布物
         uses: actions/upload-artifact@v4
