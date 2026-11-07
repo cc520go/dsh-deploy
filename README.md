@@ -202,7 +202,7 @@ lib/common.sh           日志、路径、服务、启动器
 lib/hy2.sh              Hysteria2 附加协议（安装/卸载/链接/状态/轮换）
 lib/backup.sh lib/node.sh lib/service.sh lib/download.sh lib/perm.sh lib/bbr.sh
 versions-hy2.conf       钉死的 hysteria 版本与 per-arch SHA256
-docs/                   设计文档（hysteria2-scheme-v5.md）
+docs/                   交接与待办（TODO.md）、发布公钥
 tools/build-release.sh  打发布物（tar.gz + 单文件安装器 + SHA256SUMS）
 tools/smoke-remote.sh   验收清单
 tests/run_tests.sh      测试套件（沙箱内跑，不碰真机）

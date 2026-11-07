@@ -421,7 +421,7 @@ EOF
 # the hysteria user; a clean start (still alive after a few seconds) passes.
 # hy2_fix_perms: the hysteria user must be able to traverse the config dir
 # and read its own files. Dir is root:hysteria 750 (not 700 — that would
-# lock the service out of its own cert, a real failure on 686).
+# lock the service out of its own cert, a real failure seen on a live Debian box).
 hy2_fix_perms() {
     [[ -d "${HY2_CONF_DIR}" ]] || return 0
     chown root:"${HY2_USER}" "${HY2_CONF_DIR}" 2>/dev/null || true
