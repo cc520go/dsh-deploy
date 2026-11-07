@@ -201,6 +201,12 @@ cp "${REPO_ROOT}/tools/mirror/index.html" "${DIST}/index.html" \
     || fail "missing: tools/mirror/index.html"
 info "copied mirror index.html"
 
+# The self-check script is a release asset too; it used to arrive only
+# because dist/smoke-remote.sh was committed. dist/ is no longer tracked.
+cp "${REPO_ROOT}/tools/smoke-remote.sh" "${DIST}/smoke-remote.sh" \
+    || fail "missing: tools/smoke-remote.sh"
+info "copied smoke-remote.sh"
+
 # 分离签名：SHA256SUMS.asc 由仓库里的公钥可验。没有签名私钥就拒绝发布，
 # 除非显式 --no-sign（仅用于本地调试）。
 if [[ "${NO_SIGN:-0}" == "1" ]]; then
