@@ -54,7 +54,7 @@ current_version() {
 # snapshot_create: takes a snapshot of the current install state and prints
 # the snapshot directory (stdout). Prunes to the newest SNAPSHOT_KEEP.
 snapshot_create() {
-    local stamp ver dir bin_sha conf_sha suffix=1
+    local stamp ver dir bin_sha conf_sha bin_sha_now suffix=1
     stamp="$(date +%Y%m%d-%H%M%S)"
     ver="$(current_version)"
     dir="${SNAPSHOT_PARENT}/xray-backup-${stamp}-${ver}"
@@ -65,7 +65,14 @@ snapshot_create() {
     done
     mkdir -p "${dir}" || { die "cannot create snapshot dir: ${dir}"; return 1; }
     if [[ -f "${XRAY_BIN}" ]]; then
-        cp -a "${XRAY_BIN}" "${dir}/xray.bin" || { die "snapshot: failed to copy binary"; return 1; }
+        bin_sha_now="$(sha256sum "${XRAY_BIN}" | cut -d' ' -f1)"
+        # Same binary as an older snapshot: hardlink that snapshot's copy,
+        # never the live path, so an in-place upgrade cannot corrupt it.
+        if ! snapshot_link_previous "${bin_sha_now}" "${dir}" "${SNAPSHOT_PARENT}" \
+                'xray-backup-*' 'xray.bin'; then
+            cp -a "${XRAY_BIN}" "${dir}/xray.bin" \
+                || { die "snapshot: failed to copy binary"; return 1; }
+        fi
     fi
     if [[ -f "${XRAY_CONF}" ]]; then
         cp -a "${XRAY_CONF}" "${dir}/config.json" || { die "snapshot: failed to copy config"; return 1; }
@@ -229,7 +236,11 @@ snapshot_restore() {
         return 1
     fi
     if [[ -f "${snap}/xray.bin" ]]; then
-        cp -a "${snap}/xray.bin" "${XRAY_BIN}" || { die "restore: failed to restore binary"; return 1; }
+        # --remove-destination: snapshots are hardlinked, so the live path
+        # must be unlinked before the copy or it would write through the
+        # shared inode and change the snapshot too.
+        cp -a --remove-destination "${snap}/xray.bin" "${XRAY_BIN}" \
+            || { die "restore: failed to restore binary"; return 1; }
         chmod 755 "${XRAY_BIN}" || true
         log_info "restored binary from ${snap}"
     else
@@ -251,7 +262,7 @@ snapshot_restore() {
             cp -a "${snap}/xray.service.d" "${XRAY_UNIT_DIR}/xray.service.d" 2>/dev/null || true
         fi
         if [[ -d "${snap}/share-xray" ]]; then
-            cp -a "${snap}/share-xray/." "${XRAY_SHARE_DIR}/" 2>/dev/null || true
+            cp -a --remove-destination "${snap}/share-xray/." "${XRAY_SHARE_DIR}/" 2>/dev/null || true
         fi
         log_info "restored units/geodata from ${snap}"
     fi

@@ -1416,6 +1416,34 @@ t_snapshot_known_good_prune() {
     return 0
 }
 
+t_snapshot_binary_reuse() {
+    local d="${SANDBOX}/snapshot-reuse" snap1 snap2 before
+    mkdir -p "${d}"
+    SNAPSHOT_PARENT="${d}"
+    # Keep the shared fake binary intact for the tests that follow.
+    cp -a "${XRAY_BIN}" "${d}/xray.saved" || return 1
+    printf 'OLD-BINARY\n' > "${XRAY_BIN}" || return 1
+    chmod 755 "${XRAY_BIN}" || return 1
+    render_config "PLACEHOLDER-UUID" "PLACEHOLDER-SID" "PLACEHOLDER-PRIVATE-KEY" \
+        "sni.example" "443" "vision" "www.apple.com:443" "${XRAY_CONF}" || return 1
+    snap1="$(snapshot_create)" || return 1
+    snap2="$(snapshot_create)" || return 1
+    # The second snapshot reuses the first one's binary, never the live file.
+    [[ "${snap1}/xray.bin" -ef "${snap2}/xray.bin" ]] || return 1
+    [[ ! "${snap1}/xray.bin" -ef "${XRAY_BIN}" ]] || return 1
+    before="$(sha256sum "${snap1}/xray.bin" | cut -d' ' -f1)"
+    # A legacy in-place writer must not be able to corrupt a snapshot.
+    printf 'NEW-BINARY\n' > "${XRAY_BIN}" || return 1
+    [[ "$(sha256sum "${snap1}/xray.bin" | cut -d' ' -f1)" == "${before}" ]] || return 1
+    [[ "$(cat "${snap2}/xray.bin")" == "OLD-BINARY" ]] || return 1
+    # Restore unlinks the live path first, so the snapshot stays intact.
+    snapshot_restore "${snap2}" binary >/dev/null 2>&1 || return 1
+    [[ "$(cat "${XRAY_BIN}")" == "OLD-BINARY" ]] || return 1
+    [[ "$(cat "${snap2}/xray.bin")" == "OLD-BINARY" ]] || return 1
+    cp -a --remove-destination "${d}/xray.saved" "${XRAY_BIN}" || return 1
+    return 0
+}
+
 t_diag_restore_offer() {
     # shellcheck disable=SC1091
     source "${REPO_ROOT}/diagnose.sh"
@@ -1624,6 +1652,7 @@ t_hy2_link_and_guard() {
     hy2_snapshot_list | grep -q 'hy2-backup-' || return 1
 
     unset HY2_BIN HY2_CONF_DIR HY2_CONF HY2_UNIT_DIR HY2_UNIT HY2_MARKER HY2_SNAPSHOT_PARENT
+    rm -rf -- "${tmp}"
     return 0
 }
 
@@ -1684,6 +1713,7 @@ run_test t_test_override_production
 run_test t_node_apply_rollback
 run_test t_snapshot_latest_order
 run_test t_snapshot_known_good_prune
+run_test t_snapshot_binary_reuse
 run_test t_diag_restore_offer
 run_test t_sni_precheck
 run_test t_logrotate_smart_install_present

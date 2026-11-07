@@ -150,7 +150,7 @@ hy2_detect_arch() {
 # ---------------------------------------------------------- snapshot ----
 # HY2 snapshots live in their own namespace and never mix with xray ones.
 hy2_snapshot_create() {
-    local stamp ver dir suffix=1 sha_bin sha_conf
+    local stamp ver dir suffix=1 sha_bin sha_conf bin_sha_now
     stamp="$(date +%Y%m%d-%H%M%S)"
     ver="$(hy2_version_installed)"
     dir="${HY2_SNAPSHOT_PARENT}/${HY2_SNAPSHOT_PREFIX}${stamp}-${ver}"
@@ -159,7 +159,14 @@ hy2_snapshot_create() {
         dir="${HY2_SNAPSHOT_PARENT}/${HY2_SNAPSHOT_PREFIX}${stamp}-${ver}-${suffix}"
     done
     mkdir -p "${dir}" || { die "cannot create HY2 snapshot dir: ${dir}"; return 1; }
-    [[ -f "${HY2_BIN}" ]]   && cp -a "${HY2_BIN}"   "${dir}/hysteria.bin" 2>/dev/null || true
+    if [[ -f "${HY2_BIN}" ]]; then
+        bin_sha_now="$(sha256sum "${HY2_BIN}" | cut -d' ' -f1)"
+        # Reuse an older snapshot's binary (same hash), not the live path.
+        if ! snapshot_link_previous "${bin_sha_now}" "${dir}" "${HY2_SNAPSHOT_PARENT}" \
+                "${HY2_SNAPSHOT_PREFIX}*" 'hysteria.bin'; then
+            cp -a "${HY2_BIN}" "${dir}/hysteria.bin" 2>/dev/null || true
+        fi
+    fi
     [[ -f "${HY2_CONF}" ]]  && cp -a "${HY2_CONF}"  "${dir}/config.yaml"  2>/dev/null || true
     [[ -f "${HY2_CERT}" ]]  && cp -a "${HY2_CERT}"  "${dir}/cert.pem"     2>/dev/null || true
     [[ -f "${HY2_KEY}" ]]   && cp -a "${HY2_KEY}"   "${dir}/key.pem"      2>/dev/null || true

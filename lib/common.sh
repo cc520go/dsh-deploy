@@ -45,6 +45,26 @@ log_error() { printf '[ERROR] %s\n' "$*" >&2; }
 # die: print an error and return 1. Callers MUST stop afterwards (see above).
 die() { log_error "$*"; return 1; }
 
+# snapshot_link_previous <sha> <dir> <parent> <name-glob> <file>: when an
+# older snapshot recorded the same binary hash, hardlink its file into <dir>
+# instead of copying the multi-MB core binary again. Snapshots never share
+# an inode with the live path, so an in-place upgrade cannot corrupt them;
+# restores must still unlink the destination first (cp --remove-destination).
+# Falls back to a copy when linking is not possible.
+snapshot_link_previous() {
+    local sha="$1" dir="$2" parent="$3" pattern="$4" file="$5" prev
+    for prev in "${parent}"/${pattern}; do
+        [[ -d "${prev}" && "${prev}" != "${dir}" ]] || continue
+        [[ -f "${prev}/${file}" ]] || continue
+        grep -qx "binary_sha256=${sha}" "${prev}/meta.txt" 2>/dev/null || continue
+        if ln "${prev}/${file}" "${dir}/${file}" 2>/dev/null; then
+            return 0
+        fi
+        cp -a "${prev}/${file}" "${dir}/${file}" && return 0
+    done
+    return 1
+}
+
 # ------------------------------------------------- test-mode gating ----
 # test_override <VAR>: prints the value of a XRAY_TEST_* override ONLY
 # when XRAY_TEST_MODE=1. In production, a set override is ignored and a
