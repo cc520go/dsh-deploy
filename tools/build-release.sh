@@ -34,7 +34,8 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-DSH_VERSION="${1:-$(tr -d '[:space:]' < "${REPO_ROOT}/DSH_VERSION")}"
+FILE_DSH_VERSION="$(tr -d '[:space:]' < "${REPO_ROOT}/DSH_VERSION")"
+DSH_VERSION="${1:-${FILE_DSH_VERSION}}"
 DSH_CODENAME="$(tr -d '[:space:]' < "${REPO_ROOT}/DSH_CODENAME")"
 CORE_VERSION="$(tr -d '[:space:]' < "${REPO_ROOT}/VERSION")"
 [[ -n "${DSH_VERSION}" ]] || { printf '[FAIL] DSH_VERSION is empty\n' >&2; exit 1; }
@@ -47,6 +48,13 @@ trap cleanup EXIT
 # ---------------------------------------------------------------- checks ----
 fail() { printf '[FAIL] %s\n' "$*" >&2; exit 1; }
 info() { printf '[INFO] %s\n' "$*" >&2; }
+
+# The version argument only names the artifacts; the payload ships the
+# DSH_VERSION file verbatim. A mismatch produces a package labelled X that
+# still reports Y after install, so refuse to build in that state.
+if [[ "${DSH_VERSION}" != "${FILE_DSH_VERSION}" ]]; then
+    fail "DSH_VERSION file is ${FILE_DSH_VERSION}, requested ${DSH_VERSION}; bump DSH_VERSION first."
+fi
 
 for f in "${REPO_ROOT}"/install.sh "${REPO_ROOT}"/manage.sh "${REPO_ROOT}"/diagnose.sh "${REPO_ROOT}"/lib/*.sh; do
     bash -n "${f}" || fail "syntax error: ${f}"
