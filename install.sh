@@ -72,7 +72,7 @@ usage() {
 #     process is running, so the check fails with "wait and rerun".
 #   - BBR is REPORT ONLY: kernel/congestion/qdisc/tcp_bbr version are
 #     printed, never installed, never sysctl -w, never tc changed.
-#     BBRv3+FQ stays a manual `lisa bbr bbr3` step by the operator.
+#     BBRv3+FQ stays a manual `DSH bbr bbr3` step by the operator.
 #   - Firewall / cloud security group: WARNING only, never auto-opened.
 #   - No Docker, no Nginx, no other extra software is ever installed.
 # Testability: ENV_OS_RELEASE, ENV_GITHUB_URL and
@@ -244,7 +244,7 @@ _check_github_network() {
 # _report_bbr_status: READ ONLY. Prints kernel, congestion, qdisc and
 # tcp_bbr version and whether BBRv3+FQ is effective. It never installs
 # a kernel, never writes sysctl, never runs tc, never creates a unit.
-# BBRv3+FQ remains a manual operator step (`lisa bbr bbr3`).
+# BBRv3+FQ remains a manual operator step (`DSH bbr bbr3`).
 _report_bbr_status() {
     local kernel cong qdisc modver effective="not effective"
     kernel="$(uname -r 2>/dev/null || printf 'unknown')"
@@ -258,7 +258,7 @@ _report_bbr_status() {
     if [[ "${cong}" == "bbr" && "${qdisc}" == "fq" && "${modver}" == "3" ]]; then
         effective="effective"
     fi
-    log_info "BBR status (report only, never auto-installed): kernel=${kernel}, congestion=${cong:-unknown}, qdisc=${qdisc:-unknown}, tcp_bbr=${modver:-unknown}, BBRv3+FQ ${effective}. To install/enable BBRv3+FQ, run it manually via 'lisa bbr bbr3'; this check will not do it for you."
+    log_info "BBR status (report only, never auto-installed): kernel=${kernel}, congestion=${cong:-unknown}, qdisc=${qdisc:-unknown}, tcp_bbr=${modver:-unknown}, BBRv3+FQ ${effective}. To install/enable BBRv3+FQ, run it manually via 'DSH bbr bbr3'; this check will not do it for you."
     return 0
 }
 
@@ -318,7 +318,7 @@ prompt_with_default() {
 # check is reported as such, never as a successful install. The
 # template itself is unchanged (daily, rotate 7, compress,
 # delaycompress, copytruncate), so xray keeps writing to the same
-# file and diagnose.sh / `lisa logs` keep working after rotation,
+# file and diagnose.sh / `DSH logs` keep working after rotation,
 # with no service restart.
 _install_logrotate_rule() {
     local src="$1" dest="$2" destdir
@@ -873,10 +873,10 @@ maybe_install_hy2() {
     # shellcheck disable=SC1091
     source "${SCRIPT_DIR}/lib/hy2.sh"
     printf 'yes\n' | hy2_cmd_install || {
-        log_warn "HY2 附加协议没装成功；主线 Reality 不受影响。稍后可用 lisa 菜单 13 重试。"
+        log_warn "HY2 附加协议没装成功；主线 Reality 不受影响。稍后可用 DSH 菜单 13 重试。"
         return 0
     }
-    log_info "HY2 附加协议已就绪（UDP 端口见 lisa 菜单 16）。"
+    log_info "HY2 附加协议已就绪（UDP 端口见 DSH 菜单 16）。"
     return 0
 }
 

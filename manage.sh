@@ -787,7 +787,7 @@ cmd_logs() {
 
 cmd_uninstall() {
     local purge=0 ans ans2
-    confirm "Impact: this removes the xray binary, systemd units, geodata, and the 'lisa' launcher. Your node config is KEPT by default. A snapshot backup is taken first." || { log_info "uninstall cancelled."; return 1; }
+    confirm "Impact: this removes the xray binary, systemd units, geodata, and the 'DSH' launcher. Your node config is KEPT by default. A snapshot backup is taken first." || { log_info "uninstall cancelled."; return 1; }
     printf 'Also delete the node config directory (purge)? [y/N]: '
     read -r ans || ans=""
     case "${ans}" in

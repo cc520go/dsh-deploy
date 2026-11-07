@@ -22,7 +22,7 @@
 #     3. 清空网络优化配置 (delete Lisa sysctl file, reload, tc revert;
 #                   does NOT uninstall the kernel, does NOT reboot)
 #     0. 返回
-#   Direct commands: lisa bbr bbr3|version|status|clear
+#   Direct commands: DSH bbr bbr3|version|status|clear
 #   No "bbr1", no "bbr2", no standalone install/uninstall menu items
 #   or direct commands. Kernel install exists ONLY as phase 1 of
 #   bbr3_enable, and kernel rollback (bbr_rollback_kernel) exists
@@ -392,7 +392,7 @@ bbr_prompt_reboot() {
         printf 'Reboot prompt (test mode, not rebooting): %s\n' "${context}"
         return 0
     fi
-    if confirm "Reboot now? Impact: this machine will reboot immediately; the Xray node will be down during the reboot and will come back with the same config and share link once the system is up. Old kernels are kept. After reboot, FQ is auto-enabled by the one-shot unit if the v3 kernel is running (verify with lisa bbr status); if auto-enable did not happen, re-run BBR3+FQ manually."; then
+    if confirm "Reboot now? Impact: this machine will reboot immediately; the Xray node will be down during the reboot and will come back with the same config and share link once the system is up. Old kernels are kept. After reboot, FQ is auto-enabled by the one-shot unit if the v3 kernel is running (verify with DSH bbr status); if auto-enable did not happen, re-run BBR3+FQ manually."; then
         log_info "rebooting now (${context})."
         if command -v reboot >/dev/null 2>&1; then
             reboot || systemctl reboot || { die "reboot command failed."; return 1; }
@@ -411,7 +411,7 @@ bbr_prompt_reboot() {
 # (path overridable via BBR_ONESHOT_UNIT for tests) only after a kernel
 # install succeeds, or when bbr3_enable finds a joeyblog kernel installed
 # but not running. The unit is Type=oneshot, WantedBy=multi-user.target,
-# ExecStart is the non-interactive internal target `lisa bbr auto-fq`
+# ExecStart is the non-interactive internal target `DSH bbr auto-fq`
 # (never a confirm prompt, so boot can never block on input).
 # bbr_auto_fq is the boot handler: it enables FQ ONLY when the running
 # kernel name contains joeyblog AND tcp_bbr module version == 3; on any
@@ -448,7 +448,7 @@ Description=Lisa BBRv3 one-shot auto-enable FQ (runs once after reboot, then rem
 After=network.target
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/lisa bbr auto-fq
+ExecStart=/usr/local/bin/DSH bbr auto-fq
 RemainAfterExit=no
 [Install]
 WantedBy=multi-user.target
@@ -614,7 +614,7 @@ bbr_install_kernel() {
     fi
     log_info "BBRv3 kernel ${ver} installed (tag ${tag}; backup: ${bdir})."
     printf 'Reboot to boot the new kernel; on the next boot FQ is auto-enabled by the one-shot unit if the v3 kernel is running, then the unit removes itself. Verify with lisa bbr status.\n'
-    bbr_prompt_reboot "boot the new BBRv3 kernel ${ver}; after reboot, FQ is auto-enabled by the one-shot unit — verify with lisa bbr status, and only re-run BBR3+FQ manually if FQ is not enabled"
+    bbr_prompt_reboot "boot the new BBRv3 kernel ${ver}; after reboot, FQ is auto-enabled by the one-shot unit — verify with DSH bbr status, and only re-run BBR3+FQ manually if FQ is not enabled"
     return 0
 }
 

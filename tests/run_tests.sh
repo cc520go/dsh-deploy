@@ -1080,7 +1080,7 @@ t_bbr_oneshot_created_on_install() {
     out="$(bbr3_enable 2>&1)" || return 1
     [[ -f "${BBR_ONESHOT_UNIT}" ]] || return 1
     grep -q "Type=oneshot" "${BBR_ONESHOT_UNIT}" || return 1
-    grep -q "ExecStart=/usr/local/bin/lisa bbr auto-fq" "${BBR_ONESHOT_UNIT}" || return 1
+    grep -q "ExecStart=/usr/local/bin/DSH bbr auto-fq" "${BBR_ONESHOT_UNIT}" || return 1
     grep -q "systemctl enable lisa-bbr3-oneshot.service" "${XRAY_TEST_LOG}" || return 1
     [[ ! -f "${BBR_SYSCTL_FILE}" ]] || return 1
     printf '%s' "${out}" | grep -q "BBRv3 kernel 7.0.11 installed" || return 1
