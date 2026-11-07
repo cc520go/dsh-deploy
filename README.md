@@ -23,6 +23,15 @@ Reality 走 TCP 适合下载和大流量，Hysteria2 走 UDP 适合语音、视�
 > 是测试机上的可选加速节点，可能随测试机重置而离线；镜像不可用时直接用
 > GitHub Release，不要把它当唯一入口。
 
+**方式零：一条命令（全新 Debian 12，root）**
+
+```bash
+apt-get -o DPkg::Lock::Timeout=600 update && apt-get -o DPkg::Lock::Timeout=600 install -y curl ca-certificates && curl -fsSL https://raw.githubusercontent.com/cc520go/dsh-deploy/main/tools/dsh-bootstrap.sh -o /tmp/dsh-bootstrap.sh && bash /tmp/dsh-bootstrap.sh
+```
+
+脚本会自动补 `gnupg`、校验 GPG 签名与安装器 SHA256，再执行 `--auto --with-hy2`。
+`DPkg::Lock::Timeout` 用来等全新机器开机时的后台 apt（cloud-init / unattended-upgrades）。
+
 **方式一：GitHub Release（推荐，稳定）**
 
 ```bash
