@@ -25,6 +25,18 @@
 
 _LIB_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")" && pwd)"
 
+# 统一 PATH：SSH 的非登录会话常常没有 /usr/sbin，导致 logrotate、useradd、
+# sysctl、ip 这些系统命令“看起来没装”，进而误判（真实踩过：apt 说
+# 0 newly installed，脚本却报安装失败）。这里把标准目录补齐，幂等。
+for _p in /usr/local/sbin /usr/local/bin /usr/sbin /usr/bin /sbin /bin; do
+    case ":${PATH}:" in
+        *":${_p}:"*) ;;
+        *) PATH="${PATH:+${PATH}:}${_p}" ;;
+    esac
+done
+export PATH
+unset _p
+
 # ------------------------------------------------------------ logging ----
 log_info()  { printf '[INFO] %s\n' "$*" >&2; }
 log_warn()  { printf '[WARN] %s\n' "$*" >&2; }
