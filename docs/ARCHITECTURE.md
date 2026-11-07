@@ -58,6 +58,8 @@ HY2 的 `masquerade` 只影响未通过认证的 HTTP/3 探针，不影响隧道
 - 工具安装目录 `/usr/local/share/xray-reality-manager`：历史名字，保留是为了已装机器平滑升级；
   改名需要带迁移，不能直接换常量。
 - 状态目录 `/root/.xray-reality-manager`：同样是历史名字，存 BBR 备份与节点参数。
+  改名的完整方案（目标路径、迁移步骤、兼容窗口）见 [NAMING-MIGRATION](NAMING-MIGRATION.md)，
+  计划 1.1.0 执行；1.0.x 不做运行时路径变更。
 
 ## 发布
 
