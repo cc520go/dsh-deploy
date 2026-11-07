@@ -386,9 +386,9 @@ last_error_log_time() {
 }
 
 # ------------------------------------------------------------ launcher ----
-# install_lisa_launcher <manage.sh path>: installs the tool's runtime files
+# install_launcher <manage.sh path>: installs the tool's runtime files
 # to ${TOOL_INSTALL_DIR} (persistent, never /tmp) and creates
-# ${LAUNCHER_DIR}/lisa as a symlink to the persistent manage.sh. NEVER
+# ${LAUNCHER_DIR}/${LAUNCHER_NAME} as a symlink to the persistent manage.sh. NEVER
 # overwrites an existing regular file; if an existing symlink points
 # elsewhere (e.g. an old /tmp download dir), warns then repoints it.
 # Re-running always refreshes the persistent copy from the source, so a
@@ -458,7 +458,7 @@ wait_for_listening() {
     return $?
 }
 
-install_lisa_launcher() {
+install_launcher() {
     local target="$1" link="${LAUNCHER_DIR}/${LAUNCHER_NAME}"
     local src_dir persist_dir persist_target
     src_dir="$(dirname "${target}")"

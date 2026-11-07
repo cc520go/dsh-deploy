@@ -910,6 +910,7 @@ menu() {
         printf '  \033[1;36m运维\033[0m\n'
         printf "   ${y}%2s${r} 状态检查     ${y}%2s${r} 线路诊断\n" 9 10
         printf "   ${y}%2s${r} 查看日志     ${y}%2s${r} BBR+FQ\n" 11 12
+        printf "   ${y}%2s${r} 卸载整机\n" 21
         printf "  ${rule}\n"
         printf '  \033[1;36mHysteria2\033[0m \033[90m附加协议\033[0m\n'
         printf "   ${y}%2s${r} 安装/升级    ${y}%2s${r} 卸载\n" 13 14
@@ -918,7 +919,7 @@ menu() {
         printf "   ${y}%2s${r} 一键体检     ${y}%2s${r} 伪装地址\n" 19 20
         printf "  ${rule}\n"
         printf "   ${y}%2s${r} \033[90m退出\033[0m\n" 0
-        printf '  \033[36m请选择\033[0m [0-20]: '
+        printf '  \033[36m请选择\033[0m [0-21]: '
         read -r choice || return 0
         case "${choice}" in
             1) cmd_auth ;;
@@ -949,6 +950,7 @@ menu() {
             18) hy2_cmd_rotate_cert ;;
             19) cmd_smoke ;;
             20) hy2_cmd_masquerade ;;
+            21) cmd_uninstall ;;
             0) printf '再见。\n'; return 0 ;;
             *) printf '无效选择：%s\n' "${choice}" ;;
         esac

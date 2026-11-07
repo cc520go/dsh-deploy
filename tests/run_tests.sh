@@ -617,7 +617,7 @@ t_launcher() {
     local link="${LAUNCHER_DIR}/DSH"
     local persist="${TOOL_INSTALL_DIR}/manage.sh"
     rm -f -- "${link}"
-    install_lisa_launcher "${target}" || return 1
+    install_launcher "${target}" || return 1
     # Persistent copy exists with matching content and is executable.
     [[ -f "${persist}" ]] || return 1
     [[ -x "${persist}" ]] || return 1
@@ -629,17 +629,17 @@ t_launcher() {
     [[ -L "${link}" && "$(readlink "${link}")" == "${persist}" ]] || return 1
     # Idempotent, and refreshes the persistent copy from a newer source.
     printf '#!/usr/bin/env bash\n# fake manage v2\n' > "${target}"
-    install_lisa_launcher "${target}" || return 1
+    install_launcher "${target}" || return 1
     [[ "$(cat "${persist}")" == "$(cat "${target}")" ]] || return 1
     [[ "$(readlink "${link}")" == "${persist}" ]] || return 1
     # Repoint when the link points elsewhere (e.g. an old /tmp download).
     ln -sfn "/tmp/xrm/manage.sh" "${link}"
-    install_lisa_launcher "${target}" || return 1
+    install_launcher "${target}" || return 1
     [[ "$(readlink "${link}")" == "${persist}" ]] || return 1
     # Refuse to overwrite a regular file.
     rm -f -- "${link}"
     printf 'keep me\n' > "${link}"
-    expect_fail install_lisa_launcher "${target}" || return 1
+    expect_fail install_launcher "${target}" || return 1
     [[ "$(cat "${link}")" == "keep me" ]] || return 1
     rm -f -- "${link}"
     return 0
@@ -660,7 +660,7 @@ t_menu_smoke() {
     printf '%s' "${out}" | grep -q "20 伪装地址" || return 1
     printf '%s' "${out}" | grep -q "回滚快照" || return 1
     printf '%s' "${out}" | grep -q "BBR+FQ" || return 1
-    printf '%s' "${out}" | grep -q "请选择 \[0-20\]" || return 1
+    printf '%s' "${out}" | grep -q "请选择 \[0-21\]" || return 1
     # Menu 1 changed (2026-11-03, main-chat approved): 系统安全, not outbound test.
     printf '%s' "${out}" | grep -q "认证方式" || return 1
     printf '%s' "${out}" | grep -q "运维" || return 1
@@ -999,7 +999,7 @@ t_bbr_menu_smoke() {
     printf '%s' "${out}" | grep -q "BBR+FQ" || return 1
     printf '%s' "${out}" | grep -q "伪装地址" || return 1
     printf '%s' "${out}" | grep -q "BBR+FQ enabled" || return 1
-    printf '%s' "${out}" | grep -q "请选择 \[0-20\]" || return 1
+    printf '%s' "${out}" | grep -q "请选择 \[0-21\]" || return 1
     bash "${REPO_ROOT}/manage.sh" bbr version >/dev/null 2>&1 || return 1
     bash "${REPO_ROOT}/manage.sh" bbr status >/dev/null 2>&1 || return 1
     expect_fail bash "${REPO_ROOT}/manage.sh" bbr bbr3 || return 1
@@ -1056,7 +1056,7 @@ t_menu_install_upgrade() {
     grep -q "安装指定版本核心（未装时用）" "${REPO_ROOT}/manage.sh" && return 1 || true
     grep -q "升级核心" "${REPO_ROOT}/manage.sh" || return 1
     grep -q "请选择" "${REPO_ROOT}/manage.sh" || return 1
-    grep -q "0-20" "${REPO_ROOT}/manage.sh" || return 1
+    grep -q "0-21" "${REPO_ROOT}/manage.sh" || return 1
     grep -q "通用链接" "${REPO_ROOT}/manage.sh" || return 1
     grep -q "安装/升级" "${REPO_ROOT}/manage.sh" || return 1
     grep -q "BBR+FQ" "${REPO_ROOT}/manage.sh" || return 1
@@ -1287,6 +1287,19 @@ t_detect_public_ip() {
     [[ "${ip}" == "203.0.113.10" && "${DETECT_IP_VERIFIED}" == "0" ]] || return 1
     curl() { printf ''; }
     if detect_public_ip ip 2>/dev/null; then return 1; fi
+    return 0
+}
+
+t_release_identity() {
+    local dv cv
+    dv="$(tr -d '[:space:]' < "${REPO_ROOT}/DSH_VERSION")"
+    cv="$(tr -d '[:space:]' < "${REPO_ROOT}/VERSION")"
+    [[ -n "${dv}" && -n "${cv}" ]] || return 1
+    # The user-facing version must match the files the runtime reads.
+    grep -q "DSH ${dv}" "${REPO_ROOT}/README.md" || return 1
+    grep -q "${cv}" "${REPO_ROOT}/README.md" || return 1
+    grep -q "DSH_VERSION" "${REPO_ROOT}/docs/ARCHITECTURE.md" || return 1
+    grep -q "${dv}" "${REPO_ROOT}/CHANGELOG.md" || return 1
     return 0
 }
 
@@ -1694,6 +1707,7 @@ run_test t_loopback_client_config_generation
 run_test t_status_enrichment
 run_test t_ip_display
 run_test t_detect_public_ip
+run_test t_release_identity
 run_test t_check_update_readme
 run_test t_install_repair_fail
 run_test t_install_auto_no_repair

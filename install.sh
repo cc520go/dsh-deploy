@@ -807,7 +807,7 @@ handle_already_installed() {
         # must end up with `DSH` available to diagnose/repair. Previously
         # a failed config test aborted before the launcher step, leaving
         # no menu at all (and the error's "backup menu (option 6)" unreachable).
-        install_lisa_launcher "${SCRIPT_DIR}/manage.sh" || return 1
+        install_launcher "${SCRIPT_DIR}/manage.sh" || return 1
         if [[ ! -f "${XRAY_CONF}" ]] || [[ "$(tr -d '[:space:]' < "${XRAY_CONF}")" == "{}" ]]; then
             log_info "no node config yet (installer placeholder); completing node setup."
             node_setup || return 1
@@ -969,7 +969,7 @@ main() {
     install_logrotate_config || true
     # Launcher first (see handle_already_installed): a failed node
     # setup must still leave `DSH` available for diagnosis.
-    install_lisa_launcher "${SCRIPT_DIR}/manage.sh" || return 1
+    install_launcher "${SCRIPT_DIR}/manage.sh" || return 1
     install_smoke_timer || true
     if [[ -f "${XRAY_CONF}" ]] && [[ "$(tr -d '[:space:]' < "${XRAY_CONF}")" != "{}" ]]; then
         log_info "existing non-empty config found; preserving it (not overwritten)."
