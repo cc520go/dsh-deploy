@@ -14,8 +14,10 @@
 #   - migrate the old /etc/sysctl.d/99-lisa-bbr.conf
 #   - remove a stale BBRv3 oneshot unit if an older install left one
 #
-# If the running kernel has no tcp_bbr (rare on Debian stock kernels), the
-# enable path fails closed with a clear message; it never installs a kernel.
+# tcp_bbr is normally a loadable module that Debian does not preload; the
+# sysctl write would autoload it, but the pre-check must not reject the
+# kernel before that happens. bbr_supported() tries `modprobe tcp_bbr` once
+# before failing closed, and still never installs a kernel.
 #
 # Testability: BBR_SYSCTL_FILE, BBR_LEGACY_SYSCTL_FILE, BBR_BACKUP_DIR and
 # BBR_LEGACY_ONESHOT_UNIT are overridable so tests can redirect every write
@@ -81,12 +83,22 @@ bbr_backup_dir() {
 }
 
 # bbr_supported: fail closed when the running kernel has no tcp_bbr.
+# The in-tree module is usually not loaded yet, so try loading it once
+# (the persisted sysctl would autoload it on first write anyway) instead
+# of reporting a false "kernel has no BBR".
 bbr_supported() {
     local available
     available="$(sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null || true)"
     case " ${available} " in
         *" bbr "*) return 0 ;;
     esac
+    if command -v modprobe >/dev/null 2>&1; then
+        modprobe tcp_bbr >/dev/null 2>&1 || true
+        available="$(sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null || true)"
+        case " ${available} " in
+            *" bbr "*) log_info "loaded in-tree tcp_bbr module."; return 0 ;;
+        esac
+    fi
     die "当前内核没有可用的 tcp_bbr；请使用带 BBR 的 Debian 官方内核，本工具不会安装第三方内核。"
     return 1
 }

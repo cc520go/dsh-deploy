@@ -135,7 +135,11 @@ if [[ "$1" == "-n" ]]; then
     net.ipv4.tcp_congestion_control) grep '^congestion=' "${state}" 2>/dev/null | cut -d= -f2 ;;
     net.core.default_qdisc) grep '^qdisc=' "${state}" 2>/dev/null | cut -d= -f2 ;;
     net.ipv4.tcp_available_congestion_control)
-      if [[ "${FAKE_BBR_AVAILABLE:-1}" == "0" ]]; then printf 'reno cubic\n'; else printf 'reno cubic bbr\n'; fi ;;
+      if [[ "${FAKE_BBR_AVAILABLE:-1}" == "0" && ! -f "${FAKE_BBR_LOADED:-/nonexistent}" ]]; then
+        printf 'reno cubic\n'
+      else
+        printf 'reno cubic bbr\n'
+      fi ;;
     *) exit 1 ;;
   esac
   exit 0
@@ -198,6 +202,13 @@ cat > "${SANDBOX}/bbr-fakes/modinfo" <<'FAKEEOF'
 #!/usr/bin/env bash
 if [[ "${FAKE_MODINFO_FAIL:-0}" == "1" ]]; then exit 1; fi
 printf 'version: %s\n' "${FAKE_BBR_VERSION:-1}"
+exit 0
+FAKEEOF
+# Fake modprobe (records the call; flips FAKE_BBR_LOADED when asked).
+cat > "${SANDBOX}/bbr-fakes/modprobe" <<'FAKEEOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" > "${FAKE_MODPROBE_LOG:-/tmp/fake-modprobe.log}"
+if [[ -n "${FAKE_BBR_LOADED:-}" ]]; then : > "${FAKE_BBR_LOADED}"; fi
 exit 0
 FAKEEOF
 chmod 755 "${SANDBOX}/bbr-fakes/"*
@@ -874,6 +885,9 @@ bbr_test_setup() {
     export FAKE_UNAME_R="6.1.0-18-amd64"
     export FAKE_TC_FAIL=0
     export FAKE_MODINFO_FAIL=0
+    export FAKE_MODPROBE_LOG="${SANDBOX}/fake-modprobe.log"
+    rm -f -- "${FAKE_MODPROBE_LOG}" "${SANDBOX}/tcp_bbr.loaded"
+    unset FAKE_BBR_LOADED
     return 0
 }
 
@@ -961,6 +975,20 @@ t_bbr_supported_fail_closed() {
     export FAKE_BBR_AVAILABLE=0
     expect_fail bbr_enable || return 1
     [[ ! -f "${BBR_SYSCTL_FILE}" ]] || return 1
+    return 0
+}
+
+t_bbr_autoload_module() {
+    bbr_test_setup || return 1
+    # Fresh Debian: tcp_bbr exists as a module but is not loaded yet.
+    export FAKE_BBR_AVAILABLE=0
+    export FAKE_BBR_LOADED="${SANDBOX}/tcp_bbr.loaded"
+    rm -f -- "${FAKE_BBR_LOADED}"
+    bbr_enable >/dev/null 2>&1 || return 1
+    [[ "$(cat "${FAKE_MODPROBE_LOG}" 2>/dev/null)" == "tcp_bbr" ]] || return 1
+    [[ -f "${FAKE_BBR_LOADED}" ]] || return 1
+    [[ "$(bbr_congestion)" == "bbr" ]] || return 1
+    bbr_status >/dev/null 2>&1 || return 1
     return 0
 }
 
@@ -1649,6 +1677,7 @@ run_test t_bbr_rollback_on_tc_failure
 run_test t_bbr_legacy_migration
 run_test t_bbr_clear_resets_runtime
 run_test t_bbr_supported_fail_closed
+run_test t_bbr_autoload_module
 run_test t_bbr_menu_smoke
 run_test t_hy2_masquerade_url
 run_test t_test_override_production
