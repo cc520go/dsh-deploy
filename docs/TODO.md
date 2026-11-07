@@ -25,13 +25,19 @@
 
 ## 待办
 
-- [ ] **Release 正文补镜像地址**（1 分钟，网页手动）：在
-      https://github.com/cc520go/dsh-deploy/releases/tag/v26.10.21 点 Edit，
-      正文最前面插入国内镜像那三行 curl 命令。
+- [x] ~~Release 正文补镜像地址~~（2026-11-07 完成，正文已含镜像 + 验签说明）
+- [x] ~~Release 附件换成签名版~~（6 个附件：安装器、源码包、SHA256SUMS、SHA256SUMS.asc、公钥、体检脚本）
 - [ ] **主用机部署**：装完先跑 `smoke-remote.sh --full`，绿了再切流量。
 - [ ] **可选调优**：686 的 UDP 缓冲（`net.core.rmem_max`）、BBR。
 - [ ] **可选**：把镜像从 686 迁到新机器，686 继续当测试机。
 - [ ] **清理**：手机 v2rayNG 里的 `BADPIN-test` 节点。
+
+## 发布纪律
+
+- 每次发布：`bash tools/build-release.sh`（自动签名）→ 传镜像 → Release 附件同步换新。
+- **签名私钥只在本机 `/root/.gnupg`**（release@dsh-deploy，指纹
+  `63AEB2BD09A2458B54D7AB1E7F938C08CA8E68D6`）。丢失就无法签新版本，建议离线备份。
+- 镜像与 Release 必须指向同一构建；换版本后 `sha256sum` 三处要对得上。
 
 ## 已知限制（别忘）
 
