@@ -825,6 +825,12 @@ cmd_uninstall() {
         rm -f -- "${link}" || true
         log_info "launcher removed: ${link}"
     fi
+    # 顺手清掉每日体检定时器（它只属于本工具）。
+    if [[ "${XRAY_TEST_MODE:-0}" != "1" ]]; then
+        run_systemctl disable --now dsh-smoke.timer >/dev/null 2>&1 || true
+        rm -f /etc/systemd/system/dsh-smoke.timer /etc/systemd/system/dsh-smoke.service 2>/dev/null || true
+        run_systemctl daemon-reload >/dev/null 2>&1 || true
+    fi
     log_info "uninstall complete (snapshot kept for recovery)."
     return 0
 }

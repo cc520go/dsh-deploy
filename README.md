@@ -77,6 +77,8 @@ gpg --verify SHA256SUMS.asc SHA256SUMS && sha256sum -c SHA256SUMS --ignore-missi
 | 证书 | 自签 EC P-256，100 年，SAN = 公网 IP + SNI |
 | 客户端 | V2rayNG，Reality 用 vless 链接，HY2 用 hysteria2 链接（十六进制指纹） |
 | 服务 | `xray.service`、`hysteria-server.service`，都已 enable |
+| 网络调优 | 安装 HY2 时把 UDP 缓冲调到 16MB（实测多流中位数 168→185 Mbps），写在 `/etc/sysctl.d/99-dsh-udp.conf` |
+| 自动巡检 | `dsh-smoke.timer` 每天跑一次体检，结果追加到 `/var/log/dsh-smoke.log` |
 | 文档 | 链接只在你主动选「查看链接」时打印，不写日志 |
 
 ---

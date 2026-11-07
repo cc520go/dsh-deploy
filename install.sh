@@ -849,6 +849,7 @@ handle_already_installed() {
                 fi
             fi
         fi
+        install_smoke_timer || true
         maybe_install_hy2 || true
         return 0
 }
@@ -876,6 +877,44 @@ maybe_install_hy2() {
         return 0
     }
     log_info "HY2 附加协议已就绪（UDP 端口见 lisa 菜单 16）。"
+    return 0
+}
+
+# install_smoke_timer: 每天自动跑一次体检，结果写日志。
+# 目的：把“稳定”从“你手动跑才知道”变成“每天自动留证”。
+install_smoke_timer() {
+    local unit_dir="/etc/systemd/system" svc log
+    if [[ "${XRAY_TEST_MODE:-0}" == "1" ]]; then
+        return 0
+    fi
+    svc="${unit_dir}/dsh-smoke.service"
+    log="/var/log/dsh-smoke.log"
+    cat > "${svc}" <<EOF
+[Unit]
+Description=DSH daily smoke check (read-only health report)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/DSH smoke
+StandardOutput=append:${log}
+StandardError=append:${log}
+EOF
+    cat > "${unit_dir}/dsh-smoke.timer" <<EOF
+[Unit]
+Description=Run DSH smoke check daily
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=10m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+    run_systemctl daemon-reload >/dev/null 2>&1 || true
+    run_systemctl enable --now dsh-smoke.timer >/dev/null 2>&1 || log_warn "每日体检定时器启用失败（不影响节点）"
+    log_info "每日体检已启用：systemctl list-timers | grep dsh；日志 ${log}"
     return 0
 }
 
@@ -918,6 +957,7 @@ main() {
     # Launcher first (see handle_already_installed): a failed node
     # setup must still leave `DSH` available for diagnosis.
     install_lisa_launcher "${SCRIPT_DIR}/manage.sh" || return 1
+    install_smoke_timer || true
     if [[ -f "${XRAY_CONF}" ]] && [[ "$(tr -d '[:space:]' < "${XRAY_CONF}")" != "{}" ]]; then
         log_info "existing non-empty config found; preserving it (not overwritten)."
         if ! config_test "${XRAY_CONF}"; then
