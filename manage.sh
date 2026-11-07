@@ -2,26 +2,24 @@
 #
 # manage.sh — menu + direct commands for xray-reality-manager.
 #
-# Menu display name: Lisa 一键部署. Launch command: `DSH` (install.sh
-# copies this tool to a persistent dir and creates a /usr/local/bin/lisa
+# Menu display name: DSH 一键部署. Launch command: `DSH` (install.sh
+# copies this tool to a persistent dir and creates a /usr/local/bin/DSH
 # symlink to the persistent copy; never overwrites an existing regular
 # file, and never points the launcher at a /tmp download dir).
 #
-# Slim menu (menu 1 changed 2026-11-03, C approved in main chat):
+# Menu:
 #   1  system security: change auth method (password off, key login on)  7  node config management
 #   2  view current core version               8  DSH-Reality share link
 #   3  check official updates                  9  config + service status
 #   4  manual core upgrade                    10  line diagnostics
 #   5  rollback to latest snapshot            11  logs
-#   6  backup (create snapshot)               12  BBR (BBRv3+FQ only:
-#      install v3 kernel if needed + reboot prompt + FQ, version/status, clear)
+#   6  backup (create snapshot)               12  official BBR+FQ
 #   0  exit
 # Direct `install` command is kept as a fallback (menu 1 no longer shows it).
 # Uninstall is NOT in the menu; it stays as a direct command only
-# (triple-confirmed for purge). Watchdog, snapshot export, no-Vision
-# fallback, BBR1 and standalone BBR kernel install/uninstall were removed;
-# kernel install survives ONLY as phase 1 of BBRv3+FQ. Rollback is menu 5
-# only (menu 6 is backup only).
+# (triple-confirmed for purge). No third-party kernel install exists: menu 12
+# only persists/applies the in-tree BBR algorithm plus fq.
+# Rollback is menu 5 only (menu 6 is backup only).
 #
 # Direct commands (same functions, scriptable):
 #   manage.sh status|version|check-update|install [ver]|upgrade [ver]|
@@ -46,7 +44,7 @@ source "${SCRIPT_DIR}/lib/perm.sh"
 source "${SCRIPT_DIR}/lib/node.sh"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/service.sh"
-# lib/bbr.sh（719 行）按需加载：只有菜单 12 或 `DSH bbr` 才会 source，
+# lib/bbr.sh 按需加载：只有菜单 12 或 `DSH bbr` 才会 source，
 # 打开菜单/日常操作不再为它付解析成本。
 _bbr_lib() {
     # shellcheck disable=SC1091
@@ -62,9 +60,10 @@ usage() {
     printf 'Commands: status, version, check-update, install [ver], upgrade [ver], downgrade [ver],\n'
     printf '          rollback [snapshot], backup, restore [snapshot], node <sub>,\n'
     printf '          share, diag [--loopback], logs, uninstall, bbr <sub>, auth,\n'
-    printf '          hy2 <install|uninstall|link|status|logs|rotate-cert|restore|snapshot>, smoke, menu, help\n'
+    printf '          hy2 <install|uninstall|link|status|logs|rotate-cert|masquerade|restore|snapshot>, smoke, menu, help\n'
     printf 'auth = menu 1, 更改认证方式（关闭密码、开启密钥登录）\n'
-    printf 'hy2 = Hysteria2 附加协议（菜单 13-18）。BBR subs: bbr3, version, status, clear (auto-fq is the internal one-shot boot target, not a menu item)\n'
+    printf 'hy2 = Hysteria2 附加协议（菜单 13-18，20 = 伪装地址）。\n'
+    printf 'BBR = 官方内核 BBR+FQ（菜单 12）；subs: enable, version, status, clear\n'
     printf 'Node subs: show, init, share, sni, restore-main\n'
     printf 'With no command, the interactive menu opens. Type `DSH` to open it.\n'
 }
@@ -852,29 +851,28 @@ cmd_bbr() {
     shift || true
     case "${sub}" in
         ""|menu) bbr_menu ;;
-        bbr3) bbr3_enable ;;
-        auto-fq) bbr_auto_fq ;;
+        enable) bbr_enable ;;
         version) bbr_version ;;
         status) bbr_status ;;
         clear) bbr_clear ;;
-        *) die "bbr: unknown subcommand '${sub}' (bbr3|version|status|clear|auto-fq)."; return 1 ;;
+        bbr3) die "BBRv3 安装已移除；请用 'DSH bbr enable'（官方内核 BBR+FQ）。"; return 1 ;;
+        *) die "bbr: unknown subcommand '${sub}' (enable|version|status|clear)."; return 1 ;;
     esac
 }
 
 bbr_menu() {
     local choice
     while true; do
-        printf '  ── BBR 加速方案（仅 BBRv3+FQ）──\n'
-        printf '  一键流程：选 1 装内核，重启一次，重启后自动开 FQ，回来用 2 验 effective；\n'
-        printf '  验不过顶多再重启一次或手动跑一次 1，不要把重启当成一定生效。\n'
-        printf '   1.  BBRv3+FQ\n'
+        printf '  ── BBR+FQ（官方内核）──\n'
+        printf '  只设置 congestion=bbr + qdisc=fq；不安装内核、不重启、不改 Xray。\n'
+        printf '   1.  一键启用 BBR+FQ\n'
         printf '   2.  检查版本与状态\n'
-        printf '   3.  清空网络优化配置\n'
+        printf '   3.  清除 BBR 配置\n'
         printf '   0.  返回\n'
         printf '请选择 [0-3]: '
         read -r choice || return 0
         case "${choice}" in
-            1) bbr3_enable ;;
+            1) bbr_enable ;;
             2) bbr_version; bbr_status || true ;;
             3) bbr_clear ;;
             0) return 0 ;;
@@ -900,16 +898,16 @@ menu() {
         printf "  ${rule}\n"
         printf '  \033[1;36m运维\033[0m\n'
         printf "   ${y}%2s${r} 状态检查     ${y}%2s${r} 线路诊断\n" 9 10
-        printf "   ${y}%2s${r} 查看日志     ${y}%2s${r} BBR 加速\n" 11 12
+        printf "   ${y}%2s${r} 查看日志     ${y}%2s${r} BBR+FQ\n" 11 12
         printf "  ${rule}\n"
         printf '  \033[1;36mHysteria2\033[0m \033[90m附加协议\033[0m\n'
         printf "   ${y}%2s${r} 安装/升级    ${y}%2s${r} 卸载\n" 13 14
         printf "   ${y}%2s${r} 查看链接     ${y}%2s${r} 状态/重启\n" 15 16
         printf "   ${y}%2s${r} 日志         ${y}%2s${r} 轮换证书\n" 17 18
-        printf "   ${y}%2s${r} 一键体检\n" 19
+        printf "   ${y}%2s${r} 一键体检     ${y}%2s${r} 伪装地址\n" 19 20
         printf "  ${rule}\n"
         printf "   ${y}%2s${r} \033[90m退出\033[0m\n" 0
-        printf '  \033[36m请选择\033[0m [0-19]: '
+        printf '  \033[36m请选择\033[0m [0-20]: '
         read -r choice || return 0
         case "${choice}" in
             1) cmd_auth ;;
@@ -931,7 +929,7 @@ menu() {
                 ;;
             10) cmd_diag ;;
             11) cmd_logs ;;
-            12) cmd_bbr menu ;;
+            12) cmd_bbr enable ;;
             13) hy2_cmd_install ;;
             14) hy2_cmd_uninstall ;;
             15) hy2_cmd_link ;;
@@ -939,6 +937,7 @@ menu() {
             17) hy2_cmd_logs ;;
             18) hy2_cmd_rotate_cert ;;
             19) cmd_smoke ;;
+            20) hy2_cmd_masquerade ;;
             0) printf '再见。\n'; return 0 ;;
             *) printf '无效选择：%s\n' "${choice}" ;;
         esac

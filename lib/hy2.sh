@@ -42,6 +42,11 @@ HY2_SNI="${HY2_SNI:-www.bing.com}"
 HY2_BW_UP="${HY2_BW_UP:-50}"
 HY2_BW_DOWN="${HY2_BW_DOWN:-250}"
 HY2_CERT_DAYS="${HY2_CERT_DAYS:-36500}"
+# Default masquerade target for new installs. Existing configs keep their
+# current URL unless the operator changes it via `DSH hy2 masquerade`.
+# Kept equal to the common Reality camouflage site so both protocols look
+# like the same destination.
+HY2_MASQUERADE_URL="${HY2_MASQUERADE_URL:-https://www.apple.com}"
 
 # ------------------------------------------------------------- pins ----
 hy2_pin_value() {
@@ -322,9 +327,69 @@ hy2_write_password() {
     return 0
 }
 
-# hy2_write_config <password> <public-ip>
+# hy2_masquerade_url: current masquerade URL from config (stdout), empty
+# when the config file or the key is absent.
+hy2_masquerade_url() {
+    local f="${HY2_CONF}" line
+    [[ -f "${f}" ]] || return 1
+    line="$(awk '
+        /^masquerade:/{m=1; next}
+        m && /^[[:space:]]*url:[[:space:]]*/ {
+            sub(/^[[:space:]]*url:[[:space:]]*/, "");
+            sub(/[[:space:]]*#.*$/, "");
+            print; exit
+        }
+    ' "${f}" 2>/dev/null)"
+    line="${line%\"}"; line="${line#\"}"
+    line="${line%\'}"; line="${line#\'}"
+    [[ -n "${line}" ]] || return 1
+    printf '%s' "${line}"
+}
+
+# hy2_validate_masquerade_url <url>: HTTPS-only, public host, no credentials,
+# and YAML-safe (no quotes, whitespace or #). Domain-only; private IPs and
+# localhost are rejected to avoid obvious SSRF/open-proxy abuse.
+hy2_validate_masquerade_url() {
+    local url="$1" rest host
+    [[ -n "${url}" ]] || { die "伪装地址不能为空。"; return 1; }
+    case "${url}" in
+        https://*) ;;
+        *) die "伪装地址必须是 https:// 开头（got: ${url}）。"; return 1 ;;
+    esac
+    case "${url}" in
+        *'"'*|*"'"*|*'#'*|*[[:space:]]*)
+            die "伪装地址不能包含引号、# 或空白。"; return 1 ;;
+    esac
+    rest="${url#https://}"
+    [[ "${rest}" == *"@"* ]] && { die "伪装地址不能包含用户名/密码。"; return 1; }
+    host="${rest%%/*}"
+    host="${host%%:*}"
+    [[ -n "${host}" ]] || { die "伪装地址缺少主机名。"; return 1; }
+    case "${host}" in
+        localhost|0.0.0.0|127.*|10.*|192.168.*|169.254.*)
+            die "伪装地址不能指向本机或私网（${host}）。"; return 1 ;;
+        172.1[6-9].*|172.2[0-9].*|172.3[01].*)
+            die "伪装地址不能指向私网（${host}）。"; return 1 ;;
+        *[!A-Za-z0-9.-]*)
+            die "伪装地址主机名不合法（${host}）。"; return 1 ;;
+    esac
+    case "${host}" in
+        *.*) ;;
+        *) die "伪装地址需要是域名，不能是裸主机名（${host}）。"; return 1 ;;
+    esac
+    return 0
+}
+
+# hy2_write_config <password> <public-ip> [masquerade-url]
+# The URL is preserved from the existing config when omitted, so reinstalls
+# and repairs do not silently reset a custom masquerade target.
 hy2_write_config() {
-    local pw="$1" ip="$2" tmp
+    local pw="$1" ip="$2" url="${3:-}" tmp
+    if [[ -z "${url}" ]]; then
+        url="$(hy2_masquerade_url 2>/dev/null || true)"
+    fi
+    [[ -n "${url}" ]] || url="${HY2_MASQUERADE_URL}"
+    hy2_validate_masquerade_url "${url}" || return 1
     tmp="$(mktemp)"
     # shellcheck disable=SC2064
     trap "rm -f -- '${tmp}'" RETURN
@@ -344,7 +409,7 @@ hy2_write_config() {
         printf 'masquerade:\n'
         printf '  type: proxy\n'
         printf '  proxy:\n'
-        printf '    url: https://www.bing.com\n'
+        printf '    url: %s\n' "${url}"
         printf '    rewriteHost: true\n'
     } > "${tmp}"
     install -m 600 -o "${HY2_USER}" -g "${HY2_USER}" "${tmp}" "${HY2_CONF}" || { die "写配置失败"; return 1; }
@@ -744,6 +809,93 @@ hy2_cmd_restore() {
     hy2_snapshot_restore "${d}"
 }
 
+# hy2_masquerade_show: display the current probe-facing URL. This never
+# prints the password, certificate or client link.
+hy2_masquerade_show() {
+    local url
+    url="$(hy2_masquerade_url 2>/dev/null || true)"
+    if [[ -n "${url}" ]]; then
+        printf 'HY2 伪装地址: %s\n' "${url}"
+    else
+        printf 'HY2 伪装地址: %s（默认，配置中未读到）\n' "${HY2_MASQUERADE_URL}"
+    fi
+    printf '配置文件    : %s\n' "${HY2_CONF}"
+    printf '说明        : 只影响未认证的 HTTP/3 探针，不影响 HY2 隧道和客户端链接。\n'
+}
+
+# hy2_masquerade_set [url]: snapshot, rewrite config, config-test, restart,
+# roll back on failure. The client link is intentionally unchanged.
+hy2_masquerade_set() {
+    local url="${1:-}" cur snap pw ip
+    hy2_installed || { die "HY2 还没装。"; return 1; }
+    hy2_marker_present || { die "${HY2_CONF_DIR} 没有本项目标记，拒绝修改。"; return 1; }
+    if [[ -z "${url}" ]]; then
+        cur="$(hy2_masquerade_url 2>/dev/null || true)"
+        printf '当前伪装地址: %s\n新地址: ' "${cur:-${HY2_MASQUERADE_URL}}"
+        read -r url || return 0
+    fi
+    hy2_validate_masquerade_url "${url}" || return 1
+    cur="$(hy2_masquerade_url 2>/dev/null || true)"
+    if [[ "${cur}" == "${url}" ]]; then
+        log_info "伪装地址没有变化: ${url}"
+        return 0
+    fi
+    snap="$(hy2_snapshot_create)" || return 1
+    pw="$(hy2_read_password)" || {
+        log_error "读不到 HY2 密码，回滚。"
+        hy2_snapshot_restore "${snap}" || true
+        return 1
+    }
+    ip="$(hy2_public_ip 2>/dev/null || true)"
+    if ! hy2_write_config "${pw}" "${ip}" "${url}"; then
+        hy2_snapshot_restore "${snap}" || true
+        return 1
+    fi
+    hy2_fix_perms
+    if ! hy2_config_test; then
+        log_error "新伪装配置测试失败，回滚。"
+        hy2_snapshot_restore "${snap}" || true
+        return 1
+    fi
+    if ! run_systemctl restart "${HY2_SERVICE}"; then
+        log_error "HY2 重启失败，回滚。"
+        hy2_snapshot_restore "${snap}" || true
+        run_systemctl restart "${HY2_SERVICE}" >/dev/null 2>&1 || true
+        return 1
+    fi
+    if ! hy2_selfcheck; then
+        log_error "HY2 重启后自检未通过，回滚。"
+        hy2_snapshot_restore "${snap}" || true
+        run_systemctl restart "${HY2_SERVICE}" >/dev/null 2>&1 || true
+        return 1
+    fi
+    log_info "HY2 伪装地址已更新: ${url}（客户端链接不变）"
+    return 0
+}
+
+hy2_masquerade_reset() {
+    hy2_masquerade_set "${HY2_MASQUERADE_URL}"
+}
+
+# hy2_cmd_masquerade: show/set/reset. With no args it prints the current
+# value, then prompts for show/set/reset (menu 20); direct commands can
+# pass the subcommand and URL.
+hy2_cmd_masquerade() {
+    local sub="${1:-}"
+    if [[ -z "${sub}" ]]; then
+        hy2_masquerade_show
+        printf '操作（show/set/reset）: '
+        read -r sub || return 0
+    fi
+    shift || true
+    case "${sub}" in
+        show|"") hy2_masquerade_show ;;
+        set) hy2_masquerade_set "${1:-}" ;;
+        reset) hy2_masquerade_reset ;;
+        *) die "hy2 masquerade: 未知子命令 '${sub}' (show|set|reset)"; return 1 ;;
+    esac
+}
+
 # -------------------------------------------------------------- menu ----
 hy2_menu() {
     local c
@@ -754,7 +906,8 @@ hy2_menu() {
     printf ' 16. HY2 状态 / 重启服务\n'
     printf ' 17. 查看 HY2 日志\n'
     printf ' 18. 轮换 HY2 证书\n'
-    printf '请选择 [13-18]: '
+    printf ' 20. 伪装地址（HTTP/3 探针）\n'
+    printf '请选择 [13-18/20]: '
     read -r c || return 0
     case "${c}" in
         13) hy2_cmd_install ;;
@@ -763,6 +916,7 @@ hy2_menu() {
         16) hy2_cmd_status ;;
         17) hy2_cmd_logs ;;
         18) hy2_cmd_rotate_cert ;;
+        20) hy2_cmd_masquerade ;;
         *) printf '无效选择：%s\n' "${c}"; return 0 ;;
     esac
     return 0
@@ -778,9 +932,10 @@ hy2_cmd() {
         status) hy2_cmd_status ;;
         logs) hy2_cmd_logs "$@" ;;
         rotate-cert) hy2_cmd_rotate_cert ;;
+        masquerade) hy2_cmd_masquerade "$@" ;;
         restore) hy2_cmd_restore "$@" ;;
         snapshot) hy2_snapshot_create ;;
         menu|"") hy2_menu ;;
-        *) die "hy2: 未知子命令 '${sub}' (install|uninstall|link|status|logs|rotate-cert|restore|snapshot)"; return 1 ;;
+        *) die "hy2: 未知子命令 '${sub}' (install|uninstall|link|status|logs|rotate-cert|masquerade|restore|snapshot)"; return 1 ;;
     esac
 }

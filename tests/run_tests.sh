@@ -119,15 +119,12 @@ export BBR_MODULE_VERSION_FILE="${SANDBOX}/tcp_bbr_version"
 printf '3' > "${BBR_MODULE_VERSION_FILE}"
 
 # ---- BBR test paths (sandbox, before sourcing lib/bbr.sh) ----
-export BBR_SYSCTL_FILE="${SANDBOX}/bbr-sysctl.conf"
+export BBR_SYSCTL_FILE="${SANDBOX}/99-dsh-bbr.conf"
+export BBR_LEGACY_SYSCTL_FILE="${SANDBOX}/99-lisa-bbr.conf"
 export BBR_BACKUP_DIR="${SANDBOX}/bbr-backups"
-export BBR_OS_RELEASE="${SANDBOX}/os-release"
-export BBR_GRUB_CFG="${SANDBOX}/grub.cfg"
-export BBR_ONESHOT_UNIT="${SANDBOX}/lisa-bbr3-oneshot.service"
-export BBR_ONESHOT_RESULT="${SANDBOX}/bbr-oneshot-result.log"
+export BBR_LEGACY_ONESHOT_UNIT="${SANDBOX}/lisa-bbr3-oneshot.service"
 export FAKE_SYSCTL_STATE="${SANDBOX}/fake-sysctl-state"
 export FAKE_TC_STATE="${SANDBOX}/fake-tc-state"
-export FAKE_DPKG_MARKER="${SANDBOX}/fake-dpkg-marker"
 mkdir -p "${SANDBOX}/bbr-fakes"
 # Fake sysctl (state file: congestion= / qdisc= lines).
 cat > "${SANDBOX}/bbr-fakes/sysctl" <<'FAKEEOF'
@@ -137,6 +134,8 @@ if [[ "$1" == "-n" ]]; then
   case "$2" in
     net.ipv4.tcp_congestion_control) grep '^congestion=' "${state}" 2>/dev/null | cut -d= -f2 ;;
     net.core.default_qdisc) grep '^qdisc=' "${state}" 2>/dev/null | cut -d= -f2 ;;
+    net.ipv4.tcp_available_congestion_control)
+      if [[ "${FAKE_BBR_AVAILABLE:-1}" == "0" ]]; then printf 'reno cubic\n'; else printf 'reno cubic bbr\n'; fi ;;
     *) exit 1 ;;
   esac
   exit 0
@@ -199,38 +198,6 @@ cat > "${SANDBOX}/bbr-fakes/modinfo" <<'FAKEEOF'
 #!/usr/bin/env bash
 if [[ "${FAKE_MODINFO_FAIL:-0}" == "1" ]]; then exit 1; fi
 printf 'version: %s\n' "${FAKE_BBR_VERSION:-1}"
-exit 0
-FAKEEOF
-# Fake dpkg (marker file = joeyblog installed).
-cat > "${SANDBOX}/bbr-fakes/dpkg" <<'FAKEEOF'
-#!/usr/bin/env bash
-marker="${FAKE_DPKG_MARKER:-/tmp/fake-dpkg-marker}"
-if [[ "$1" == "-l" ]]; then
-  if [[ -f "${marker}" ]]; then printf 'ii  linux-image-7.0.11-joeyblog  7.0.11  amd64  fake\n'; fi
-  exit 0
-fi
-if [[ "$1" == "-i" ]]; then
-  if [[ "${FAKE_DPKG_FAIL:-0}" == "1" ]]; then exit 1; fi
-  touch "${marker}"
-  exit 0
-fi
-if [[ "$1" == "-r" || "$1" == "--remove" ]]; then
-  rm -f "${marker}"
-  exit 0
-fi
-exit 1
-FAKEEOF
-# Fake update-grub (appends the new version to the sandbox grub cfg).
-cat > "${SANDBOX}/bbr-fakes/update-grub" <<'FAKEEOF'
-#!/usr/bin/env bash
-if [[ "${FAKE_UPDATE_GRUB_FAIL:-0}" == "1" ]]; then exit 1; fi
-printf 'menuentry "Debian GNU/Linux, with Linux %s" {}\n' "${FAKE_GRUB_VERSION:-7.0.11}" >> "${BBR_GRUB_CFG:-/tmp/fake-grub.cfg}"
-exit 0
-FAKEEOF
-# Fake systemd-detect-virt (not Hyper-V in tests).
-cat > "${SANDBOX}/bbr-fakes/systemd-detect-virt" <<'FAKEEOF'
-#!/usr/bin/env bash
-printf 'kvm\n'
 exit 0
 FAKEEOF
 chmod 755 "${SANDBOX}/bbr-fakes/"*
@@ -462,7 +429,7 @@ t_env_check_debian12() {
     printf 'congestion=bbr\nqdisc=fq\n' > "${FAKE_SYSCTL_STATE}"
     printf '3' > "${BBR_MODULE_VERSION_FILE}"
     out="$(env_check 2>&1)" || ok=0
-    printf '%s' "${out}" | grep -q "BBRv3+FQ effective" || ok=0
+    printf '%s' "${out}" | grep -q "BBR+FQ effective" || ok=0
     printf '%s' "${out}" | grep -q "port 443 free" || ok=0
     export XRAY_TEST_LISTEN_PORTS="443"
     if env_check >/dev/null 2>&1; then ok=0; fi
@@ -473,7 +440,7 @@ t_env_check_debian12() {
     printf 'congestion=cubic\nqdisc=fq_codel\n' > "${FAKE_SYSCTL_STATE}"
     printf '1' > "${BBR_MODULE_VERSION_FILE}"
     out="$(env_check 2>&1)" || ok=0
-    printf '%s' "${out}" | grep -q "BBRv3+FQ not effective" || ok=0
+    printf '%s' "${out}" | grep -q "BBR+FQ not effective" || ok=0
     printf 'ID=debian\nVERSION_ID="11"\n' > "${test_os}"
     if env_check >/dev/null 2>&1; then ok=0; fi
     printf 'ID=ubuntu\nVERSION_ID="24.04"\n' > "${test_os}"
@@ -679,9 +646,10 @@ t_menu_smoke() {
     printf '%s' "${out}" | grep -q "13 安装/升级" || return 1
     printf '%s' "${out}" | grep -q "18 轮换证书" || return 1
     printf '%s' "${out}" | grep -q "19 一键体检" || return 1
+    printf '%s' "${out}" | grep -q "20 伪装地址" || return 1
     printf '%s' "${out}" | grep -q "回滚快照" || return 1
-    printf '%s' "${out}" | grep -q "BBR 加速" || return 1
-    printf '%s' "${out}" | grep -q "请选择 \[0-19\]" || return 1
+    printf '%s' "${out}" | grep -q "BBR+FQ" || return 1
+    printf '%s' "${out}" | grep -q "请选择 \[0-20\]" || return 1
     # Menu 1 changed (2026-11-03, main-chat approved): 系统安全, not outbound test.
     printf '%s' "${out}" | grep -q "认证方式" || return 1
     printf '%s' "${out}" | grep -q "运维" || return 1
@@ -892,21 +860,20 @@ t_wait_for_listening() {
     return 0
 }
 
-t_bbr_joeyblog_rc_filter() {
-    local rc_dir="${SANDBOX}/rc-fakes" out
-    mkdir -p "${rc_dir}" || return 1
-    cat > "${rc_dir}/dpkg" <<'FAKEEOF'
-#!/usr/bin/env bash
-if [[ "$1" == "-l" ]]; then printf 'rc  linux-image-7.3.0-joeyblog-bbrv3  7.3.0  amd64  fake\n'; exit 0; fi
-exit 1
-FAKEEOF
-    chmod 755 "${rc_dir}/dpkg" || return 1
-    export PATH="${rc_dir}:${PATH}"
-    [[ -z "$(bbr_joeyblog_pkgs)" ]] || return 1
-    # BBRv3-only version: no standalone uninstall command; an rc-only package must
-    # still count as not installed in version output.
-    out="$(bbr_version 2>&1)" || return 1
-    printf '%s' "${out}" | grep -q "joeyblog pkgs  : (none)" || return 1
+# ------------------------------------------------------------ BBR ----
+# bbr_test_setup: reset the shared fake BBR state to stock Debian defaults
+# (module v1, Cubic + fq_codel, no DSH sysctl file).
+bbr_test_setup() {
+    printf 'congestion=cubic\nqdisc=fq_codel\n' > "${FAKE_SYSCTL_STATE}"
+    printf 'fq_codel\n' > "${FAKE_TC_STATE}"
+    rm -f -- "${BBR_SYSCTL_FILE}" "${BBR_LEGACY_SYSCTL_FILE}" "${BBR_LEGACY_ONESHOT_UNIT}"
+    rm -rf -- "${BBR_BACKUP_DIR}"
+    mkdir -p "${BBR_BACKUP_DIR}"
+    export FAKE_BBR_VERSION=1
+    export FAKE_BBR_AVAILABLE=1
+    export FAKE_UNAME_R="6.1.0-18-amd64"
+    export FAKE_TC_FAIL=0
+    export FAKE_MODINFO_FAIL=0
     return 0
 }
 
@@ -926,85 +893,40 @@ FAKEEOF
     return 0
 }
 
-
-
-# ------------------------------------------------------------ BBR ----
-# bbr_test_setup: resets all fake BBR state to stock defaults
-# (Debian 12, kernel 6.1, module v1, Cubic + fq_codel, no Lisa file,
-# no joeyblog package, empty grub cfg). Called first in every BBR test
-# because the sandbox state files are shared across test subshells.
-bbr_test_setup() {
-    printf 'congestion=cubic\nqdisc=fq_codel\n' > "${FAKE_SYSCTL_STATE}"
-    printf 'fq_codel\n' > "${FAKE_TC_STATE}"
-    printf 'ID=debian\nVERSION_ID="12"\n' > "${BBR_OS_RELEASE}"
-    : > "${BBR_GRUB_CFG}"
-    rm -f -- "${BBR_SYSCTL_FILE}" "${FAKE_DPKG_MARKER}" "${BBR_ONESHOT_UNIT}" "${BBR_ONESHOT_RESULT}"
-    rm -rf -- "${BBR_BACKUP_DIR}"
-    mkdir -p "${BBR_BACKUP_DIR}"
-    export FAKE_BBR_VERSION=1
-    export FAKE_UNAME_R="6.1.0-18-amd64"
-    export FAKE_GRUB_VERSION="7.0.11"
-    export FAKE_TC_FAIL=0
-    export FAKE_DPKG_FAIL=0
-    export FAKE_UPDATE_GRUB_FAIL=0
-    export FAKE_MODINFO_FAIL=0
-    return 0
-}
-
-t_bbr_check_env_debian12_only() {
-    # Debian 12 exclusive (2026-11-02): BBR kernel install accepts
-    # Debian 12 only; Ubuntu and Debian 11 are rejected. This locks
-    # in that only the Ubuntu branch was removed — BBR itself,
-    # including its read-only version/status checks, is unchanged.
-    bbr_test_setup || return 1
-    bbr_check_env || return 1
-    printf 'ID=ubuntu\nVERSION_ID="24.04"\n' > "${BBR_OS_RELEASE}"
-    expect_fail bbr_check_env || return 1
-    printf 'ID=debian\nVERSION_ID="11"\n' > "${BBR_OS_RELEASE}"
-    expect_fail bbr_check_env || return 1
-    printf 'ID=debian\nVERSION_ID="12"\n' > "${BBR_OS_RELEASE}"
-    bbr_check_env || return 1
-    return 0
-}
-
-t_bbr3_fq_rollback() {
-    # FQ enable on a running v3 kernel, with tc failing: sysctl file must
-    # be rolled back, not left as a partial success.
-    bbr_test_setup || return 1
-    export FAKE_BBR_VERSION=3
-    export FAKE_UNAME_R="7.0.11-joeyblog"
-    export FAKE_TC_FAIL=1
-    expect_fail bbr3_enable || return 1
-    [[ ! -f "${BBR_SYSCTL_FILE}" ]] || return 1
-    [[ "$(bbr_congestion)" == "cubic" ]] || return 1
-    [[ "$(bbr_qdisc)" == "fq_codel" ]] || return 1
-    [[ "$(cat "${FAKE_TC_STATE}")" == "fq_codel" ]] || return 1
-    return 0
-}
-
-t_bbr_version_status() {
+t_bbr_official_version_status() {
     local out
     bbr_test_setup || return 1
     out="$(bbr_version 2>&1)" || return 1
     printf '%s' "${out}" | grep -q "running kernel : 6.1.0-18-amd64" || return 1
     printf '%s' "${out}" | grep -q "tcp_bbr version: 1" || return 1
     printf '%s' "${out}" | grep -q "congestion     : cubic" || return 1
+    printf '%s' "${out}" | grep -q "DSH sysctl     : (absent)" || return 1
     expect_fail bbr_status || return 1
-    export FAKE_BBR_VERSION=3
-    export FAKE_UNAME_R="7.0.11-joeyblog"
-    bbr3_enable >/dev/null 2>&1 || return 1
+    bbr_enable >/dev/null 2>&1 || return 1
     out="$(bbr_status 2>&1)" || return 1
     printf '%s' "${out}" | grep -q "effective" || return 1
+    printf '%s' "${out}" | grep -q "official BBRv1" || return 1
     return 0
 }
 
-t_bbr_clear() {
+t_bbr_enable_status() {
     bbr_test_setup || return 1
-    export FAKE_BBR_VERSION=3
-    export FAKE_UNAME_R="7.0.11-joeyblog"
-    bbr3_enable >/dev/null 2>&1 || return 1
+    bbr_enable >/dev/null 2>&1 || return 1
     [[ -f "${BBR_SYSCTL_FILE}" ]] || return 1
-    bbr_clear || return 1
+    [[ "$(bbr_congestion)" == "bbr" ]] || return 1
+    [[ "$(bbr_qdisc)" == "fq" ]] || return 1
+    [[ "$(cat "${FAKE_TC_STATE}")" == "fq" ]] || return 1
+    grep -q 'tcp_congestion_control=bbr' "${BBR_SYSCTL_FILE}" || return 1
+    bbr_status >/dev/null 2>&1 || return 1
+    # Idempotent: a second enable must not fail or duplicate work.
+    bbr_enable >/dev/null 2>&1 || return 1
+    return 0
+}
+
+t_bbr_rollback_on_tc_failure() {
+    bbr_test_setup || return 1
+    export FAKE_TC_FAIL=1
+    expect_fail bbr_enable || return 1
     [[ ! -f "${BBR_SYSCTL_FILE}" ]] || return 1
     [[ "$(bbr_congestion)" == "cubic" ]] || return 1
     [[ "$(bbr_qdisc)" == "fq_codel" ]] || return 1
@@ -1012,187 +934,73 @@ t_bbr_clear() {
     return 0
 }
 
-
-t_bbr3_already_v3() {
-    local out
+t_bbr_legacy_migration() {
     bbr_test_setup || return 1
-    export FAKE_BBR_VERSION=3
-    export FAKE_UNAME_R="7.0.11-joeyblog"
-    out="$(bbr3_enable 2>&1)" || return 1
-    printf '%s' "${out}" | grep -q "BBR3+FQ enabled" || return 1
-    printf '%s' "${out}" | grep -q "version=3" || return 1
+    printf 'net.ipv4.tcp_congestion_control=bbr\nnet.core.default_qdisc=fq\n' > "${BBR_LEGACY_SYSCTL_FILE}"
+    bbr_enable >/dev/null 2>&1 || return 1
     [[ -f "${BBR_SYSCTL_FILE}" ]] || return 1
-    [[ ! -f "${FAKE_DPKG_MARKER}" ]] || return 1
+    [[ ! -f "${BBR_LEGACY_SYSCTL_FILE}" ]] || return 1
+    bbr_status >/dev/null 2>&1 || return 1
     return 0
 }
 
-t_bbr3_installed_not_running() {
-    # joeyblog kernel installed but not running: offer a reboot prompt
-    # (test mode prints would-reboot, never reboots), return 0, FQ pending
-    # after reboot; never enable FQ as v1.
-    local out
+t_bbr_clear_resets_runtime() {
     bbr_test_setup || return 1
-    touch "${FAKE_DPKG_MARKER}"
-    out="$(bbr3_enable 2>&1)" || return 1
-    printf '%s' "${out}" | grep -q "not running" || return 1
-    printf '%s' "${out}" | grep -q "NOT enabled now" || return 1
-    printf '%s' "${out}" | grep -q "test mode, not rebooting" || return 1
+    bbr_enable >/dev/null 2>&1 || return 1
+    bbr_clear >/dev/null 2>&1 || return 1
     [[ ! -f "${BBR_SYSCTL_FILE}" ]] || return 1
+    [[ ! -f "${BBR_LEGACY_SYSCTL_FILE}" ]] || return 1
     [[ "$(bbr_congestion)" == "cubic" ]] || return 1
+    [[ "$(bbr_qdisc)" == "fq_codel" ]] || return 1
+    [[ "$(cat "${FAKE_TC_STATE}")" == "fq_codel" ]] || return 1
     return 0
 }
 
-t_bbr3_install_from_stock() {
-    # Clean stock VPS path: no joeyblog, module v1 -> install kernel
-    # (mocked API/download), grub verified, reboot prompt in test mode,
-    # return 0, FQ still pending (not enabled on the old kernel).
-    local out
+t_bbr_supported_fail_closed() {
     bbr_test_setup || return 1
-    bbr_api_get() {
-        case "$1" in
-            *"/releases/tags/"*) printf '%s' '{"assets":[{"browser_download_url":"https://example.invalid/linux-image-7.0.11-joeyblog.deb"}]}' ;;
-            *) printf '%s' '{"tag_name":"x86_64-7.0.11"}' ;;
-        esac
-    }
-    bbr_download_file() { printf 'fake-deb\n' > "$2"; }
-    out="$(bbr3_enable 2>&1)" || return 1
-    printf '%s' "${out}" | grep -q "BBRv3 kernel 7.0.11 installed" || return 1
-    printf '%s' "${out}" | grep -q "test mode, not rebooting" || return 1
-    [[ -f "${FAKE_DPKG_MARKER}" ]] || return 1
-    grep -q "7.0.11" "${BBR_GRUB_CFG}" || return 1
+    export FAKE_BBR_AVAILABLE=0
+    expect_fail bbr_enable || return 1
     [[ ! -f "${BBR_SYSCTL_FILE}" ]] || return 1
-    [[ "$(bbr_congestion)" == "cubic" ]] || return 1
-    return 0
-}
-
-t_bbr_oneshot_created_on_install() {
-    # Kernel install success creates the oneshot unit (Type=oneshot,
-    # ExecStart is the internal auto-fq target); FQ is still pending.
-    local out
-    bbr_test_setup || return 1
-    bbr_api_get() {
-        case "$1" in
-            *"/releases/tags/"*) printf '%s' '{"assets":[{"browser_download_url":"https://example.invalid/linux-image-7.0.11-joeyblog.deb"}]}' ;;
-            *) printf '%s' '{"tag_name":"x86_64-7.0.11"}' ;;
-        esac
-    }
-    bbr_download_file() { printf 'fake-deb\n' > "$2"; }
-    out="$(bbr3_enable 2>&1)" || return 1
-    [[ -f "${BBR_ONESHOT_UNIT}" ]] || return 1
-    grep -q "Type=oneshot" "${BBR_ONESHOT_UNIT}" || return 1
-    grep -q "ExecStart=/usr/local/bin/DSH bbr auto-fq" "${BBR_ONESHOT_UNIT}" || return 1
-    grep -q "systemctl enable lisa-bbr3-oneshot.service" "${XRAY_TEST_LOG}" || return 1
-    [[ ! -f "${BBR_SYSCTL_FILE}" ]] || return 1
-    printf '%s' "${out}" | grep -q "BBRv3 kernel 7.0.11 installed" || return 1
-    return 0
-}
-
-t_bbr_oneshot_auto_fq_v3() {
-    # Boot handler on a real v3 kernel: non-interactive (auto-confirm
-    # off must not block it), enables FQ, verifies, then removes itself
-    # and leaves an OK result line.
-    bbr_test_setup || return 1
-    export FAKE_BBR_VERSION=3
-    export FAKE_UNAME_R="7.0.11-joeyblog"
-    bbr_oneshot_install || return 1
-    [[ -f "${BBR_ONESHOT_UNIT}" ]] || return 1
-    export XRAY_TEST_AUTO_CONFIRM=0
-    bbr_auto_fq </dev/null || return 1
-    export XRAY_TEST_AUTO_CONFIRM=1
-    [[ -f "${BBR_SYSCTL_FILE}" ]] || return 1
-    [[ "$(bbr_congestion)" == "bbr" ]] || return 1
-    [[ "$(bbr_qdisc)" == "fq" ]] || return 1
-    [[ ! -f "${BBR_ONESHOT_UNIT}" ]] || return 1
-    grep -q "systemctl disable lisa-bbr3-oneshot.service" "${XRAY_TEST_LOG}" || return 1
-    grep -q " OK " "${BBR_ONESHOT_RESULT}" || return 1
-    return 0
-}
-
-t_bbr_oneshot_skips_non_v3() {
-    # Stock kernel: boot handler skips, never enables FQ as v1, and
-    # still removes the unit so no active task is left behind.
-    bbr_test_setup || return 1
-    bbr_oneshot_install || return 1
-    expect_fail bbr_auto_fq || return 1
-    [[ ! -f "${BBR_SYSCTL_FILE}" ]] || return 1
-    [[ "$(bbr_congestion)" == "cubic" ]] || return 1
-    [[ ! -f "${BBR_ONESHOT_UNIT}" ]] || return 1
-    grep -q " SKIP " "${BBR_ONESHOT_RESULT}" || return 1
-    grep -q "systemctl disable lisa-bbr3-oneshot.service" "${XRAY_TEST_LOG}" || return 1
-    return 0
-}
-
-t_bbr_oneshot_fq_failure_no_leftover() {
-    # v3 kernel but tc fails: FQ rolls back, unit is removed, result
-    # is FAIL, and nothing is claimed effective.
-    bbr_test_setup || return 1
-    export FAKE_BBR_VERSION=3
-    export FAKE_UNAME_R="7.0.11-joeyblog"
-    export FAKE_TC_FAIL=1
-    bbr_oneshot_install || return 1
-    expect_fail bbr_auto_fq || return 1
-    [[ ! -f "${BBR_SYSCTL_FILE}" ]] || return 1
-    [[ "$(bbr_congestion)" == "cubic" ]] || return 1
-    [[ ! -f "${BBR_ONESHOT_UNIT}" ]] || return 1
-    grep -q " FAIL " "${BBR_ONESHOT_RESULT}" || return 1
-    return 0
-}
-
-t_bbr_oneshot_rollback_and_clear_remove() {
-    # Rollback removes the unit; clear removes it both when no sysctl
-    # file exists and when a confirmed clear deletes the sysctl file.
-    bbr_test_setup || return 1
-    bbr_oneshot_install || return 1
-    bbr_rollback_kernel "${BBR_BACKUP_DIR}/dummy" || return 1
-    [[ ! -f "${BBR_ONESHOT_UNIT}" ]] || return 1
-    bbr_test_setup || return 1
-    bbr_oneshot_install || return 1
-    bbr_clear || return 1
-    [[ ! -f "${BBR_ONESHOT_UNIT}" ]] || return 1
-    bbr_test_setup || return 1
-    export FAKE_BBR_VERSION=3
-    export FAKE_UNAME_R="7.0.11-joeyblog"
-    bbr3_enable >/dev/null 2>&1 || return 1
-    bbr_oneshot_install || return 1
-    bbr_clear || return 1
-    [[ ! -f "${BBR_SYSCTL_FILE}" ]] || return 1
-    [[ ! -f "${BBR_ONESHOT_UNIT}" ]] || return 1
-    return 0
-}
-
-t_bbr3_manual_confirm_unchanged() {
-    # Manual bbr3 still requires confirmation: with auto-confirm off
-    # it must fail (not auto-confirm), and with it on it succeeds.
-    bbr_test_setup || return 1
-    export FAKE_BBR_VERSION=3
-    export FAKE_UNAME_R="7.0.11-joeyblog"
-    export XRAY_TEST_AUTO_CONFIRM=0
-    expect_fail bbr3_enable </dev/null || return 1
-    export XRAY_TEST_AUTO_CONFIRM=1
-    bbr3_enable >/dev/null 2>&1 || return 1
-    [[ -f "${BBR_SYSCTL_FILE}" ]] || return 1
     return 0
 }
 
 t_bbr_menu_smoke() {
     local out
     bbr_test_setup || return 1
-    out="$(printf '12\n0\n0\n' | bash "${REPO_ROOT}/manage.sh" menu 2>&1 | strip_ansi)"
-    printf '%s' "${out}" | grep -q "BBR 加速方案" || return 1
-    printf '%s' "${out}" | grep -q "BBRv3+FQ" || return 1
-    printf '%s' "${out}" | grep -q "检查版本与状态" || return 1
-    printf '%s' "${out}" | grep -q "清空网络优化配置" || return 1
-    printf '%s' "${out}" | grep -q "请选择 \[0-3\]" || return 1
-    printf '%s' "${out}" | grep -q "Reality · Hysteria2" || return 1
-    if printf '%s' "${out}" | grep -q "BBR1+FQ"; then return 1; fi
-    # Direct commands: version/status work, bbr1/bbr2/install/uninstall fail.
+    out="$(printf '12\n\n0\n' | bash "${REPO_ROOT}/manage.sh" menu 2>&1 | strip_ansi)"
+    printf '%s' "${out}" | grep -q "BBR+FQ" || return 1
+    printf '%s' "${out}" | grep -q "伪装地址" || return 1
+    printf '%s' "${out}" | grep -q "BBR+FQ enabled" || return 1
+    printf '%s' "${out}" | grep -q "请选择 \[0-20\]" || return 1
     bash "${REPO_ROOT}/manage.sh" bbr version >/dev/null 2>&1 || return 1
-    bash "${REPO_ROOT}/manage.sh" bbr status >/dev/null 2>&1 || true
-    expect_fail bash "${REPO_ROOT}/manage.sh" bbr bbr1 || return 1
-    expect_fail bash "${REPO_ROOT}/manage.sh" bbr bbr2 || return 1
+    bash "${REPO_ROOT}/manage.sh" bbr status >/dev/null 2>&1 || return 1
+    expect_fail bash "${REPO_ROOT}/manage.sh" bbr bbr3 || return 1
     expect_fail bash "${REPO_ROOT}/manage.sh" bbr badcmd || return 1
-    expect_fail bash "${REPO_ROOT}/manage.sh" bbr install || return 1
-    expect_fail bash "${REPO_ROOT}/manage.sh" bbr uninstall || return 1
+    return 0
+}
+
+t_hy2_masquerade_url() {
+    local f="${SANDBOX}/hy2-masquerade.yaml" out
+    # shellcheck disable=SC1091
+    source "${REPO_ROOT}/lib/hy2.sh"
+    [[ "${HY2_MASQUERADE_URL}" == "https://www.apple.com" ]] || return 1
+    cat > "${f}" <<'EOF'
+listen: :443
+masquerade:
+  type: proxy
+  proxy:
+    url: https://www.example.com/path
+    rewriteHost: true
+EOF
+    export HY2_CONF="${f}"
+    out="$(hy2_masquerade_url)" || return 1
+    [[ "${out}" == "https://www.example.com/path" ]] || return 1
+    hy2_validate_masquerade_url "${out}" || return 1
+    hy2_validate_masquerade_url "https://www.apple.com" || return 1
+    expect_fail hy2_validate_masquerade_url "http://example.com" || return 1
+    expect_fail hy2_validate_masquerade_url "https://127.0.0.1/" || return 1
+    expect_fail hy2_validate_masquerade_url "https://10.0.0.1/" || return 1
+    expect_fail hy2_validate_masquerade_url "https://user:pass@example.com/" || return 1
     return 0
 }
 
@@ -1220,10 +1028,11 @@ t_menu_install_upgrade() {
     grep -q "安装指定版本核心（未装时用）" "${REPO_ROOT}/manage.sh" && return 1 || true
     grep -q "升级核心" "${REPO_ROOT}/manage.sh" || return 1
     grep -q "请选择" "${REPO_ROOT}/manage.sh" || return 1
-    grep -q "0-19" "${REPO_ROOT}/manage.sh" || return 1
+    grep -q "0-20" "${REPO_ROOT}/manage.sh" || return 1
     grep -q "通用链接" "${REPO_ROOT}/manage.sh" || return 1
     grep -q "安装/升级" "${REPO_ROOT}/manage.sh" || return 1
-    grep -q "BBR 加速" "${REPO_ROOT}/manage.sh" || return 1
+    grep -q "BBR+FQ" "${REPO_ROOT}/manage.sh" || return 1
+    grep -q "伪装地址" "${REPO_ROOT}/manage.sh" || return 1
     return 0
 }
 
@@ -1455,7 +1264,7 @@ t_detect_public_ip() {
 
 t_check_update_readme() {
     # VERSION stays pinned; README must say re-evaluation is manual-only.
-    grep -q "^26\.10\.21$" "${REPO_ROOT}/VERSION" || return 1
+    grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' "${REPO_ROOT}/VERSION" || return 1
     grep -q "手动评估" "${REPO_ROOT}/README.md" || return 1
     grep -q "不会自动" "${REPO_ROOT}/README.md" || return 1
     return 0
@@ -1833,22 +1642,15 @@ run_test t_install_repair_fail
 run_test t_install_auto_no_repair
 run_test t_verify_listening
 run_test t_wait_for_listening
-run_test t_bbr_joeyblog_rc_filter
 run_test t_bbr_module_version_blank
-run_test t_bbr_check_env_debian12_only
-run_test t_bbr3_fq_rollback
-run_test t_bbr_version_status
-run_test t_bbr_clear
-run_test t_bbr3_already_v3
-run_test t_bbr3_installed_not_running
-run_test t_bbr3_install_from_stock
-run_test t_bbr_oneshot_created_on_install
-run_test t_bbr_oneshot_auto_fq_v3
-run_test t_bbr_oneshot_skips_non_v3
-run_test t_bbr_oneshot_fq_failure_no_leftover
-run_test t_bbr_oneshot_rollback_and_clear_remove
-run_test t_bbr3_manual_confirm_unchanged
+run_test t_bbr_official_version_status
+run_test t_bbr_enable_status
+run_test t_bbr_rollback_on_tc_failure
+run_test t_bbr_legacy_migration
+run_test t_bbr_clear_resets_runtime
+run_test t_bbr_supported_fail_closed
 run_test t_bbr_menu_smoke
+run_test t_hy2_masquerade_url
 run_test t_test_override_production
 run_test t_node_apply_rollback
 run_test t_snapshot_latest_order

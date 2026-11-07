@@ -52,23 +52,24 @@
 | 9 | 状态检查 | ✅ | — |
 | 10 | 线路诊断 | ✅ | 12 PASS / 0 FAIL |
 | 11 | 查看日志 | ✅ | — |
-| 12 | BBR 加速 | ✅ 实测 | 装 7.3.1-joeyblog-bbrv3 内核，重启后 bbr+fq 生效、oneshot 自清、服务自动恢复 |
+| 12 | BBR+FQ | ✅ 实测 | 官方内核 `6.1.0-54`；菜单 12 一键设置 `bbr + fq`，clear 恢复 `cubic/fq_codel`；不安装第三方内核 |
 | 13–18 | HY2 六项 | ✅ | 安装/卸载/链接/状态/日志/轮换全跑过 |
 | 19 | 一键体检 | ✅ | 21 PASS |
+| 20 | HY2 伪装地址 | ✅ 实测 | show/set/reset；非法/私网 URL 拒绝；改完服务 active、链接不变 |
 
-### BBR 测试的结论与风险（重要）
+### BBR 路线（2026-11-07 调整）
 
-- 生效确认：`tcp_congestion_control=bbr`、`default_qdisc=fq`、`/sys/module/tcp_bbr/version=3`。
-- **上游不发布校验和**：脚本会再问一次「没有 checksum，是否继续」，只靠 TLS + 版本 + tag 校验。
-  这是真实供应链风险，正式机装之前要自己权衡。
-- 旧内核保留在 GRUB 菜单里，新内核起不来时可从厂商控制台选回。
+- 现在只走 **Debian 官方内核 + BBRv1 + fq**，不安装 byJoey BBRv3 内核。
+- `DSH bbr enable|status|clear` 与菜单 12 均只操作 `/etc/sysctl.d/99-dsh-bbr.conf`，不重启、不改 Xray。
+- 旧 `99-lisa-bbr.conf` 会在第一次 enable 时迁移到 `99-dsh-bbr.conf`。
+- BBRv3 的第三方内核路径已从代码中移除；旧机器若还有 `lisa-bbr3-oneshot`，clear 会顺手清掉。
 
 ## 部署状态（2026-11-07）
 
 - **主用机**：已上线。一条命令装完，`DSH smoke --full` 21 PASS，客户端实测
   Reality 与 Hysteria2 **双通**。
 - **测试机**：继续担任测试 + 静态镜像站（`http://<测试机>/lisa-install.sh`）。
-- 主用机暂不装 BBRv3 内核（上游无校验和），先观察一周。
+- 主用机继续官方内核 + BBRv1；不装第三方 BBRv3 内核。
 
 ## 发布渠道（2026-11-07 定）
 

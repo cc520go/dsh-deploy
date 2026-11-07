@@ -72,7 +72,7 @@ usage() {
 #     process is running, so the check fails with "wait and rerun".
 #   - BBR is REPORT ONLY: kernel/congestion/qdisc/tcp_bbr version are
 #     printed, never installed, never sysctl -w, never tc changed.
-#     BBRv3+FQ stays a manual `DSH bbr bbr3` step by the operator.
+#     BBR+FQ stays a manual `DSH bbr enable` step by the operator.
 #   - Firewall / cloud security group: WARNING only, never auto-opened.
 #   - No Docker, no Nginx, no other extra software is ever installed.
 # Testability: ENV_OS_RELEASE, ENV_GITHUB_URL and
@@ -242,9 +242,9 @@ _check_github_network() {
 }
 
 # _report_bbr_status: READ ONLY. Prints kernel, congestion, qdisc and
-# tcp_bbr version and whether BBRv3+FQ is effective. It never installs
+# tcp_bbr version and whether BBR+FQ is effective. It never installs
 # a kernel, never writes sysctl, never runs tc, never creates a unit.
-# BBRv3+FQ remains a manual operator step (`DSH bbr bbr3`).
+# BBR+FQ remains a manual operator step (`DSH bbr enable`).
 _report_bbr_status() {
     local kernel cong qdisc modver effective="not effective"
     kernel="$(uname -r 2>/dev/null || printf 'unknown')"
@@ -255,10 +255,12 @@ _report_bbr_status() {
     else
         modver="$(modinfo tcp_bbr 2>/dev/null | awk '/^version:/ {print $2; exit}' || printf '')"
     fi
-    if [[ "${cong}" == "bbr" && "${qdisc}" == "fq" && "${modver}" == "3" ]]; then
+    # A stock in-tree BBR module has no version field: that is BBRv1.
+    [[ -n "${modver}" ]] || modver=1
+    if [[ "${cong}" == "bbr" && "${qdisc}" == "fq" ]]; then
         effective="effective"
     fi
-    log_info "BBR status (report only, never auto-installed): kernel=${kernel}, congestion=${cong:-unknown}, qdisc=${qdisc:-unknown}, tcp_bbr=${modver:-unknown}, BBRv3+FQ ${effective}. To install/enable BBRv3+FQ, run it manually via 'DSH bbr bbr3'; this check will not do it for you."
+    log_info "BBR status (report only, never auto-installed): kernel=${kernel}, congestion=${cong:-unknown}, qdisc=${qdisc:-unknown}, tcp_bbr=${modver} (1=official BBRv1, 3=external BBRv3), BBR+FQ ${effective}. To enable, run 'DSH bbr enable'; this check will not do it for you."
     return 0
 }
 
@@ -879,7 +881,11 @@ maybe_install_hy2() {
     fi
     # shellcheck disable=SC1091
     source "${SCRIPT_DIR}/lib/hy2.sh"
-    printf 'yes\n' | hy2_cmd_install || {
+    if hy2_installed; then
+        log_info "HY2 已安装（$(hy2_version_installed)），本次跳过；需要升级请用 DSH 菜单 13。"
+        return 0
+    fi
+    printf 'yes\n' | hy2_cmd_install "$(hy2_default_version)" || {
         log_warn "HY2 附加协议没装成功；主线 Reality 不受影响。稍后可用 DSH 菜单 13 重试。"
         return 0
     }
