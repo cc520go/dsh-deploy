@@ -19,10 +19,22 @@ Reality 走 TCP 适合下载和大流量，Hysteria2 走 UDP 适合语音、视�
 > 最小化系统可能没装 `curl` / `gnupg`（下载和验签要用）：
 > `apt-get update && apt-get install -y curl gnupg`
 
-> **发布渠道：以镜像为准。** GitHub Release 仅作版本归档，可能落后于最新修复；
-> 装新机器一律用下面的镜像地址。
+> **发布渠道：以 GitHub Release 为准。** 镜像站 `http://64.205.110.102/`
+> 是测试机上的可选加速节点，可能随测试机重置而离线；镜像不可用时直接用
+> GitHub Release，不要把它当唯一入口。
 
-**方式一：国内镜像（推荐，不依赖 GitHub）**
+**方式一：GitHub Release（推荐，稳定）**
+
+```bash
+base=https://github.com/cc520go/dsh-deploy/releases/latest/download
+curl -fsSLO "$base/dsh-install-1.0.1.sh"
+curl -fsSLO "$base/SHA256SUMS" "$base/SHA256SUMS.asc" "$base/dsh-signing-key.asc"
+gpg --import dsh-signing-key.asc
+gpg --verify SHA256SUMS.asc SHA256SUMS && sha256sum -c SHA256SUMS --ignore-missing
+bash dsh-install-1.0.1.sh --auto --with-hy2
+```
+
+**方式二：国内镜像（可选加速，可能离线）**
 
 ```bash
 curl -fsSL http://64.205.110.102/dsh-install.sh -o /tmp/dsh-install.sh
@@ -30,13 +42,13 @@ sha256sum /tmp/dsh-install.sh          # 对比 SHA256SUMS
 bash /tmp/dsh-install.sh --auto --with-hy2
 ```
 
-**方式二：从源码安装（服务器能访问 GitHub）**
+**方式三：从源码安装（服务器能访问 GitHub）**
 
 ```bash
 git clone https://github.com/cc520go/dsh-deploy.git /tmp/dsh && cd /tmp/dsh && bash install.sh --auto --with-hy2
 ```
 
-**方式三：离线单文件（完全离线）**
+**方式四：离线单文件（完全离线）**
 
 把 `dsh-install-<DSH版本>.sh`（Release 附件或 `dist/`）用 WinSCP / scp / 面板文件管理器上传，然后：
 

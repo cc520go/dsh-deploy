@@ -195,6 +195,12 @@ info "built $(basename "${SELF}") ($(du -h "${SELF}" | cut -f1))"
 )
 info "wrote dist/SHA256SUMS"
 
+# The mirror landing page is part of the release output; copy it here so
+# tools/mirror/index.html and dist/index.html cannot drift apart.
+cp "${REPO_ROOT}/tools/mirror/index.html" "${DIST}/index.html" \
+    || fail "missing: tools/mirror/index.html"
+info "copied mirror index.html"
+
 # 分离签名：SHA256SUMS.asc 由仓库里的公钥可验。没有签名私钥就拒绝发布，
 # 除非显式 --no-sign（仅用于本地调试）。
 if [[ "${NO_SIGN:-0}" == "1" ]]; then

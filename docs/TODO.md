@@ -1,4 +1,7 @@
-# 待办 / 交接清单
+# 待办 / 内部交接清单
+
+> 这是项目内部交接笔记，不是用户文档；命令可能随版本变化，使用前先对照 README。
+> 公开仓库保留仅为历史记录，不要据此直接操作生产机。
 
 最后更新：2026-11-07
 
@@ -9,7 +12,7 @@
 1. 系统装 **Debian 12**，给我 root SSH（我把公钥给你，或你给我密码）。
 2. 我这边执行：
    ```bash
-   bash lisa-install-26.10.21.sh --auto --with-hy2
+   bash dsh-install-1.0.1.sh --auto --with-hy2
    bash smoke-remote.sh --full
    ```
 3. 绿了之后，这台机器可以当：
@@ -30,11 +33,11 @@
 
 - **改名要全局搜**：把启动器 `lisa` 改成 `DSH` 时，`tools/smoke-remote.sh` 里还留着
   `LAUNCHER=/usr/local/bin/lisa`，导致验收一直报「启动器缺失」。改名后务必全仓 grep 旧名。
-- **重置会连镜像一起清掉**：686 既是测试机也是镜像站，重置后要按 `tools/mirror/README.md`
+- **重置会连镜像一起清掉**：686 既是测试机也是镜像站，重置后要按 `tools/mirror/nginx-dsh.conf`
   重装 nginx 并拷回 `dist/`（别忘了 `chmod 644/755`，否则 nginx 返回 403）。
 
-- **改了 `manage.sh` 只同步 `lib/` 是不够的**。重新跑一次安装器（`bash lisa-install-26.10.21.sh --auto`）
-  会走“已安装”分支，把工具文件刷到 `/usr/local/share/…` 并重建 `DSH`/`lisa` 启动器——
+- **改了 `manage.sh` 只同步 `lib/` 是不够的**。重新跑一次安装器（`bash dsh-install-1.0.1.sh --auto`）
+  会走“已安装”分支，把工具文件刷到 `/usr/local/share/…` 并重建 `DSH` 启动器（旧 `lisa` 会自动清理）——
   这是更新已部署机器 UI 的正确方式，不要手动 scp 单个文件。
 
 ## 菜单实测记录（2026-11-07）
@@ -71,10 +74,11 @@
 - **测试机**：继续担任测试 + 静态镜像站（`http://<测试机>/lisa-install.sh`）。
 - 主用机继续官方内核 + BBRv1；不装第三方 BBRv3 内核。
 
-## 发布渠道（2026-11-07 定）
+## 发布渠道（2026-11-07 定，2026-11-07 修订）
 
-- **分发只走镜像**：`http://<测试机>/lisa-install.sh`，每次构建后同步 `dist/`。
-- **GitHub Release 只作版本归档**，不再逐次更新附件（可能不含最新修复）。
+- **正式渠道：GitHub Release**，README 的推荐路径以它为准。
+- 镜像（`http://<测试机>/dsh-install.sh`）只是可选加速节点，测试机重置后会离线；
+  每次构建后同步 `dist/`，但不能当作唯一入口。
 - `git tag` 保留，用于回溯源码；`dist/` 保留，clone 即可用。
 
 ## 待办
