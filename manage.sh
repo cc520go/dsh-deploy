@@ -46,8 +46,12 @@ source "${SCRIPT_DIR}/lib/perm.sh"
 source "${SCRIPT_DIR}/lib/node.sh"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/service.sh"
-# shellcheck disable=SC1091
-source "${SCRIPT_DIR}/lib/bbr.sh"
+# lib/bbr.sh（719 行）按需加载：只有菜单 12 或 `DSH bbr` 才会 source，
+# 打开菜单/日常操作不再为它付解析成本。
+_bbr_lib() {
+    # shellcheck disable=SC1091
+    [[ -n "${_BBR_LOADED:-}" ]] || { source "${SCRIPT_DIR}/lib/bbr.sh"; _BBR_LOADED=1; }
+}
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/hy2.sh"
 
@@ -837,6 +841,7 @@ cmd_smoke() {
 }
 
 cmd_bbr() {
+    _bbr_lib
     local sub="${1:-}"
     shift || true
     case "${sub}" in
