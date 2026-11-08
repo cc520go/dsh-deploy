@@ -60,9 +60,9 @@ usage() {
     printf 'Commands: status, version, check-update, install [ver], upgrade [ver], downgrade [ver],\n'
     printf '          rollback [snapshot], backup, restore [snapshot], node <sub>,\n'
     printf '          share, diag [--loopback], logs, uninstall, bbr <sub>, auth,\n'
-    printf '          hy2 <install|uninstall|link|status|logs|rotate-cert|masquerade|restore|snapshot>, smoke, menu, help\n'
+    printf '          hy2 <install|uninstall|link|status|logs|rotate-cert|sni|restore|snapshot>, smoke, menu, help\n'
     printf 'auth = menu 1, 更改认证方式（关闭密码、开启密钥登录）\n'
-    printf 'hy2 = Hysteria2 附加协议（菜单 13-18，20 = 伪装域名(SNI)）。\n'
+    printf 'hy2 = Hysteria2 附加协议（菜单 13-18，20 = 自定义伪装域名）。\n'
     printf 'BBR = 官方内核 BBR+FQ（菜单 12）；subs: enable, version, status, clear\n'
     printf 'Node subs: show, init, share, sni, restore-main\n'
     printf 'With no command, the interactive menu opens. Type `DSH` to open it.\n'
@@ -916,7 +916,7 @@ menu() {
         printf "   ${y}%2s${r} 安装/升级    ${y}%2s${r} 卸载\n" 13 14
         printf "   ${y}%2s${r} 查看链接     ${y}%2s${r} 状态/重启\n" 15 16
         printf "   ${y}%2s${r} 日志         ${y}%2s${r} 轮换证书\n" 17 18
-        printf "   ${y}%2s${r} 一键体检     ${y}%2s${r} 伪装域名(SNI)\n" 19 20
+        printf "   ${y}%2s${r} 一键体检     ${y}%2s${r} 自定义伪装域名\n" 19 20
         printf "  ${rule}\n"
         printf "   ${y}%2s${r} \033[90m退出\033[0m\n" 0
         printf '  \033[36m请选择\033[0m [0-21]: '

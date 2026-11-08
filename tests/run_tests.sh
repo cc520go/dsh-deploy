@@ -657,7 +657,7 @@ t_menu_smoke() {
     printf '%s' "${out}" | grep -q "13 安装/升级" || return 1
     printf '%s' "${out}" | grep -q "18 轮换证书" || return 1
     printf '%s' "${out}" | grep -q "19 一键体检" || return 1
-    printf '%s' "${out}" | grep -q "20 伪装域名(SNI)" || return 1
+    printf '%s' "${out}" | grep -q "20 自定义伪装域名" || return 1
     printf '%s' "${out}" | grep -q "回滚快照" || return 1
     printf '%s' "${out}" | grep -q "BBR+FQ" || return 1
     printf '%s' "${out}" | grep -q "请选择 \[0-21\]" || return 1
@@ -997,7 +997,7 @@ t_bbr_menu_smoke() {
     bbr_test_setup || return 1
     out="$(printf '12\n\n0\n' | bash "${REPO_ROOT}/manage.sh" menu 2>&1 | strip_ansi)"
     printf '%s' "${out}" | grep -q "BBR+FQ" || return 1
-    printf '%s' "${out}" | grep -q "伪装域名(SNI)" || return 1
+    printf '%s' "${out}" | grep -q "自定义伪装域名" || return 1
     printf '%s' "${out}" | grep -q "BBR+FQ enabled" || return 1
     printf '%s' "${out}" | grep -q "请选择 \[0-21\]" || return 1
     bash "${REPO_ROOT}/manage.sh" bbr version >/dev/null 2>&1 || return 1
@@ -1073,7 +1073,7 @@ t_menu_install_upgrade() {
     grep -q "通用链接" "${REPO_ROOT}/manage.sh" || return 1
     grep -q "安装/升级" "${REPO_ROOT}/manage.sh" || return 1
     grep -q "BBR+FQ" "${REPO_ROOT}/manage.sh" || return 1
-    grep -q "伪装域名(SNI)" "${REPO_ROOT}/manage.sh" || return 1
+    grep -q "自定义伪装域名" "${REPO_ROOT}/manage.sh" || return 1
     return 0
 }
 
