@@ -36,13 +36,16 @@ apt-get -o DPkg::Lock::Timeout=600 update && apt-get -o DPkg::Lock::Timeout=600 
 
 ```bash
 base=https://github.com/cc520go/dsh-deploy/releases/latest/download
-curl -fsSLO "$base/dsh-install-1.4.1.sh"
 curl -fsSLO "$base/SHA256SUMS"
 curl -fsSLO "$base/SHA256SUMS.asc"
 curl -fsSLO "$base/dsh-signing-key.asc"
+# 从签名清单里取当前版本，下次发版不用改这行
+installer="$(awk '/  dsh-install-[0-9]+\.[0-9]+\.[0-9]+\.sh$/{print $2; exit}' SHA256SUMS)"
+test -n "$installer" || { echo "SHA256SUMS 里找不到安装器"; exit 1; }
+curl -fsSLO "$base/$installer"
 gpg --import dsh-signing-key.asc
 gpg --verify SHA256SUMS.asc SHA256SUMS && sha256sum -c SHA256SUMS --ignore-missing
-bash dsh-install-1.4.1.sh --auto --with-hy2
+bash "$installer" --auto --with-hy2
 ```
 
 **方式二：国内镜像（可选加速，可能离线）**
