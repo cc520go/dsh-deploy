@@ -46,10 +46,12 @@
 - 恢复时先 unlink 目标再拷贝（`cp --remove-destination` / `install`），保证不会写穿共享 inode。
 - Xray 默认保留 3 个快照 + 1 个 known-good；HY2 保留 5 个。
 
-## 伪装地址
+## HY2 伪装域名与探针站点
 
-HY2 的 `masquerade` 只影响未通过认证的 HTTP/3 探针，不影响隧道与客户端链接。只接受
-`https://` 公网地址；私网、本机、带凭据的 URL 会被拒绝。
+- 菜单 20「自定义伪装域名」修改的是 **TLS SNI**：写入 `/root/.dsh-deploy/hy2.sni`，
+  重签证书并重建客户端链接；pin 变化，旧链接失效。
+- 未认证的 HTTP/3 探针仍访问安装时写入的 `masquerade` 默认站点（内部配置，不随 SNI 变）；
+  该项不再提供菜单入口。
 
 ## 权限与路径
 

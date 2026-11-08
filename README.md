@@ -129,7 +129,7 @@ gpg --verify SHA256SUMS.asc SHA256SUMS && sha256sum -c SHA256SUMS --ignore-missi
   13 安装/升级    14 卸载
   15 查看链接     16 状态/重启
   17 日志         18 轮换证书
-  19 一键体检     20 伪装地址
+  19 一键体检     20 自定义伪装域名
 ```
 
 - **12 BBR+FQ**：只对官方内核设置 `congestion=bbr` + `qdisc=fq`，立即生效并持久化；不安装第三方内核、不重启、不改 Xray。
@@ -140,7 +140,8 @@ gpg --verify SHA256SUMS.asc SHA256SUMS && sha256sum -c SHA256SUMS --ignore-missi
 - **17 日志**：读 journal，默认级别 info。
 - **18 轮换证书**：换新证书 → 重启 → 出新链接。**所有客户端都要重导**。
 - **19 一键体检**：直接跑 `smoke-remote.sh` 的标准清单，给出 PASS/FAIL 结论；等价于 `DSH smoke`。
-- **20 伪装地址**：查看/修改/恢复 HY2 的 `masquerade.proxy.url`；只影响未认证的 HTTP/3 探针，不改客户端链接。
+- **20 自定义伪装域名**：修改 HY2 的 TLS SNI，重签证书并重新生成客户端链接；旧链接因 pin 变化失效。
+  `masquerade` 探针站点已不再进菜单，只保留安装默认值。
 
 **升级永远是手动评估，脚本不会自动升级。** 平时刻意留在钉死版本上，
 只有安全修复、客户端连不上新版、或确实需要新功能时，才在菜单 13 里输版本号主动升。
