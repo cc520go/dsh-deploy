@@ -892,16 +892,30 @@ hy2_masquerade_reset() {
 # value, then prompts for show/set/reset (menu 20); direct commands can
 # pass the subcommand and URL.
 hy2_cmd_masquerade() {
-    local sub="${1:-}"
+    local sub="${1:-}" url=""
     if [[ -z "${sub}" ]]; then
         hy2_masquerade_show
-        printf '操作（show/set/reset）: '
+        printf '操作（show/set/reset，或直接输入 https://地址）: '
         read -r sub || return 0
     fi
+    # 菜单里直接粘贴 URL 时按 set 处理，不再当成未知子命令。
+    case "${sub}" in
+        http://*|https://*)
+            hy2_masquerade_set "${sub}"
+            return $?
+            ;;
+    esac
     shift || true
     case "${sub}" in
         show|"") hy2_masquerade_show ;;
-        set) hy2_masquerade_set "${1:-}" ;;
+        set)
+            url="${1:-}"
+            if [[ -z "${url}" ]]; then
+                printf '新的伪装地址（https://）: '
+                read -r url || return 0
+            fi
+            hy2_masquerade_set "${url}"
+            ;;
         reset) hy2_masquerade_reset ;;
         *) die "hy2 masquerade: 未知子命令 '${sub}' (show|set|reset)"; return 1 ;;
     esac
