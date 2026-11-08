@@ -657,7 +657,7 @@ t_menu_smoke() {
     printf '%s' "${out}" | grep -q "13 安装/升级" || return 1
     printf '%s' "${out}" | grep -q "18 轮换证书" || return 1
     printf '%s' "${out}" | grep -q "19 一键体检" || return 1
-    printf '%s' "${out}" | grep -q "20 伪装苹果官方地址" || return 1
+    printf '%s' "${out}" | grep -q "20 伪装域名(SNI)" || return 1
     printf '%s' "${out}" | grep -q "回滚快照" || return 1
     printf '%s' "${out}" | grep -q "BBR+FQ" || return 1
     printf '%s' "${out}" | grep -q "请选择 \[0-21\]" || return 1
@@ -997,13 +997,26 @@ t_bbr_menu_smoke() {
     bbr_test_setup || return 1
     out="$(printf '12\n\n0\n' | bash "${REPO_ROOT}/manage.sh" menu 2>&1 | strip_ansi)"
     printf '%s' "${out}" | grep -q "BBR+FQ" || return 1
-    printf '%s' "${out}" | grep -q "伪装苹果官方地址" || return 1
+    printf '%s' "${out}" | grep -q "伪装域名(SNI)" || return 1
     printf '%s' "${out}" | grep -q "BBR+FQ enabled" || return 1
     printf '%s' "${out}" | grep -q "请选择 \[0-21\]" || return 1
     bash "${REPO_ROOT}/manage.sh" bbr version >/dev/null 2>&1 || return 1
     bash "${REPO_ROOT}/manage.sh" bbr status >/dev/null 2>&1 || return 1
     expect_fail bash "${REPO_ROOT}/manage.sh" bbr bbr3 || return 1
     expect_fail bash "${REPO_ROOT}/manage.sh" bbr badcmd || return 1
+    return 0
+}
+
+t_hy2_sni_validation() {
+    # shellcheck disable=SC1091
+    source "${REPO_ROOT}/lib/hy2.sh"
+    hy2_validate_sni "www.apple.com" || return 1
+    hy2_validate_sni "a-b.example.co" || return 1
+    expect_fail hy2_validate_sni "http://www.apple.com" || return 1
+    expect_fail hy2_validate_sni "www.apple.com:443" || return 1
+    expect_fail hy2_validate_sni "192.168.1.10" || return 1
+    expect_fail hy2_validate_sni "localhost" || return 1
+    expect_fail hy2_validate_sni "a..b" || return 1
     return 0
 }
 
@@ -1060,7 +1073,7 @@ t_menu_install_upgrade() {
     grep -q "通用链接" "${REPO_ROOT}/manage.sh" || return 1
     grep -q "安装/升级" "${REPO_ROOT}/manage.sh" || return 1
     grep -q "BBR+FQ" "${REPO_ROOT}/manage.sh" || return 1
-    grep -q "伪装苹果官方地址" "${REPO_ROOT}/manage.sh" || return 1
+    grep -q "伪装域名(SNI)" "${REPO_ROOT}/manage.sh" || return 1
     return 0
 }
 
@@ -1778,6 +1791,7 @@ run_test t_bbr_clear_resets_runtime
 run_test t_bbr_supported_fail_closed
 run_test t_bbr_autoload_module
 run_test t_bbr_menu_smoke
+run_test t_hy2_sni_validation
 run_test t_hy2_masquerade_url
 run_test t_test_override_production
 run_test t_node_apply_rollback

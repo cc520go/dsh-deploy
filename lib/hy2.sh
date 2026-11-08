@@ -38,6 +38,11 @@ HY2_VERSIONS_FILE="${HY2_VERSIONS_FILE:-$(dirname "${_HY2LIB_DIR}")/versions-hy2
 
 # Fixed design values (v5 §1/§4). Not menu options on purpose.
 HY2_PORT="${HY2_PORT:-443}"
+# SNI is persisted so a menu change survives reinstall/upgrade.
+HY2_SNI_FILE="${HY2_SNI_FILE:-${DSH_STATE_DIR}/hy2.sni}"
+if [[ -z "${HY2_SNI:-}" && -f "${HY2_SNI_FILE}" ]]; then
+    HY2_SNI="$(tr -d '[:space:]' < "${HY2_SNI_FILE}" 2>/dev/null || true)"
+fi
 HY2_SNI="${HY2_SNI:-www.bing.com}"
 HY2_BW_UP="${HY2_BW_UP:-50}"
 HY2_BW_DOWN="${HY2_BW_DOWN:-250}"
@@ -888,6 +893,80 @@ hy2_masquerade_reset() {
     hy2_masquerade_set "${HY2_MASQUERADE_URL}"
 }
 
+# hy2_validate_sni <domain>: public DNS name only, no scheme/port/path.
+hy2_validate_sni() {
+    local d="${1:-}"
+    [[ -n "${d}" && "${#d}" -le 253 ]] || return 1
+    [[ "${d}" == *.* ]] || return 1
+    [[ "${d}" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]] || return 1
+    [[ "${d}" != *..* && "${d}" != *. ]] || return 1
+    [[ ! "${d}" =~ ^[0-9.]+$ ]] || return 1
+    case "${d}" in
+        localhost|*.local|*.internal) return 1 ;;
+    esac
+    return 0
+}
+
+# hy2_set_sni <domain>: persist SNI, reissue the leaf cert, restart HY2 and
+# regenerate the client link (the pin changes, so old links stop working).
+hy2_set_sni() {
+    local domain="${1:-}" old="${HY2_SNI}" pw pin ip link snap
+    hy2_validate_sni "${domain}" || { die "伪装域名不合法: ${domain}（只接受公网域名，不带协议/端口/路径）"; return 1; }
+    hy2_installed || { die "HY2 还没装。先走菜单 13。"; return 1; }
+    snap="$(hy2_snapshot_create 2>/dev/null || true)"
+    printf '%s\n' "${domain}" > "${HY2_SNI_FILE}" || { die "无法写入 ${HY2_SNI_FILE}"; return 1; }
+    chmod 600 "${HY2_SNI_FILE}" 2>/dev/null || true
+    HY2_SNI="${domain}"
+    if ! hy2_gen_cert; then
+        printf '%s\n' "${old}" > "${HY2_SNI_FILE}"
+        HY2_SNI="${old}"
+        return 1
+    fi
+    if ! run_systemctl restart "${HY2_SERVICE}"; then
+        printf '%s\n' "${old}" > "${HY2_SNI_FILE}"
+        HY2_SNI="${old}"
+        hy2_gen_cert || true
+        run_systemctl restart "${HY2_SERVICE}" >/dev/null 2>&1 || true
+        die "HY2 重启失败，已回滚 SNI 到 ${old}。"
+        return 1
+    fi
+    pw="$(hy2_read_password)" || { die "找不到密码文件"; return 1; }
+    pin="$(hy2_cert_pin)" || { die "读证书指纹失败"; return 1; }
+    ip="$(hy2_public_ip || true)"
+    [[ -z "${ip}" ]] && ip="<你的服务器IP>"
+    link="$(hy2_build_link "${pw}" "${ip}" "${pin}")"
+    hy2_save_link "${link}" || true
+    log_info "HY2 伪装域名已更新: ${domain}（证书已重签，客户端链接已更新）"
+    log_info "请用菜单 15 重新导入客户端链接；旧链接因 pin 变化已失效。"
+    return 0
+}
+
+# hy2_cmd_sni: show/set/reset the HY2 TLS SNI (menu 22).
+hy2_cmd_sni() {
+    local sub="${1:-}" domain=""
+    if [[ -z "${sub}" ]]; then
+        printf '当前 HY2 伪装域名(SNI): %s\n' "${HY2_SNI}"
+        printf '新域名（如 www.apple.com，回车取消）: '
+        read -r domain || return 0
+        [[ -n "${domain}" ]] || return 0
+        hy2_set_sni "${domain}"
+        return $?
+    fi
+    case "${sub}" in
+        show) printf '%s\n' "${HY2_SNI}" ;;
+        set)
+            domain="${2:-}"
+            if [[ -z "${domain}" ]]; then
+                printf '新域名: '
+                read -r domain || return 0
+            fi
+            hy2_set_sni "${domain}"
+            ;;
+        reset) hy2_set_sni "www.bing.com" ;;
+        *) die "hy2 sni: 未知子命令 '${sub}' (show|set|reset)"; return 1 ;;
+    esac
+}
+
 # hy2_cmd_masquerade: show/set/reset. With no args it prints the current
 # value, then prompts for show/set/reset (menu 20); direct commands can
 # pass the subcommand and URL.
@@ -931,7 +1010,8 @@ hy2_menu() {
     printf ' 16. HY2 状态 / 重启服务\n'
     printf ' 17. 查看 HY2 日志\n'
     printf ' 18. 轮换 HY2 证书\n'
-    printf ' 20. 伪装地址（HTTP/3 探针）\n'
+    printf ' 20. 伪装域名（SNI，重签证书并更新链接）\n'
+    
     printf '请选择 [13-18/20]: '
     read -r c || return 0
     case "${c}" in
@@ -941,7 +1021,7 @@ hy2_menu() {
         16) hy2_cmd_status ;;
         17) hy2_cmd_logs ;;
         18) hy2_cmd_rotate_cert ;;
-        20) hy2_cmd_masquerade ;;
+        20) hy2_cmd_sni ;;
         *) printf '无效选择：%s\n' "${c}"; return 0 ;;
     esac
     return 0
@@ -958,9 +1038,10 @@ hy2_cmd() {
         logs) hy2_cmd_logs "$@" ;;
         rotate-cert) hy2_cmd_rotate_cert ;;
         masquerade) hy2_cmd_masquerade "$@" ;;
+        sni) hy2_cmd_sni "$@" ;;
         restore) hy2_cmd_restore "$@" ;;
         snapshot) hy2_snapshot_create ;;
         menu|"") hy2_menu ;;
-        *) die "hy2: 未知子命令 '${sub}' (install|uninstall|link|status|logs|rotate-cert|masquerade|restore|snapshot)"; return 1 ;;
+        *) die "hy2: 未知子命令 '${sub}' (install|uninstall|link|status|logs|rotate-cert|masquerade|sni|restore|snapshot)"; return 1 ;;
     esac
 }
