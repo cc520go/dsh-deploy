@@ -343,10 +343,11 @@ t_node_sni() {
     node_set_sni "new.example.com" || return 1
     [[ "$(read_node_param sni)" == "new.example.com" ]] || return 1
     grep -q '"new.example.com"' "${XRAY_CONF}" || return 1
+    grep -q '"new.example.com:443"' "${XRAY_CONF}" || return 1
     grep -q '"old.example.com"' "${XRAY_CONF}" && return 1
     [[ "$(read_node_param uuid)" == "${uuid}" ]] || return 1
     [[ "$(read_node_param host)" == "203.0.113.9" ]] || return 1
-    [[ "$(read_node_param dest)" == "www.apple.com:443" ]] || return 1
+    [[ "$(read_node_param dest)" == "new.example.com:443" ]] || return 1
     # IP SNI must fail and leave config + params unchanged.
     expect_fail node_set_sni "203.0.113.10" || return 1
     [[ "$(read_node_param sni)" == "new.example.com" ]] || return 1
