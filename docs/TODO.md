@@ -33,8 +33,6 @@
 
 - **改名要全局搜**：把启动器 `lisa` 改成 `DSH` 时，`tools/smoke-remote.sh` 里还留着
   `LAUNCHER=/usr/local/bin/lisa`，导致验收一直报「启动器缺失」。改名后务必全仓 grep 旧名。
-- **重置会连镜像一起清掉**：686 既是测试机也是镜像站，重置后要按 `tools/mirror/nginx-dsh.conf`
-  重装 nginx 并拷回 `dist/`（别忘了 `chmod 644/755`，否则 nginx 返回 403）。
 
 - **改了 `manage.sh` 只同步 `lib/` 是不够的**。重新跑一次安装器（`bash dsh-install-1.0.1.sh --auto`）
   会走“已安装”分支，把工具文件刷到 `/usr/local/share/…` 并重建 `DSH` 启动器（旧 `lisa` 会自动清理）——
@@ -71,31 +69,30 @@
 
 - **主用机**：已上线。一条命令装完，`DSH smoke --full` 21 PASS，客户端实测
   Reality 与 Hysteria2 **双通**。
-- **测试机**：继续担任测试 + 静态镜像站（`http://<测试机>/lisa-install.sh`）。
+- **测试机**：继续担任测试，不再兼作镜像站。
 - 主用机继续官方内核 + BBRv1；不装第三方 BBRv3 内核。
 
-## 发布渠道（2026-11-07 定，2026-11-07 修订）
+## 发布渠道（2026-11-08 更新）
 
-- **正式渠道：GitHub Release**，README 的推荐路径以它为准。
-- 镜像（`http://<测试机>/dsh-install.sh`）只是可选加速节点，测试机重置后会离线；
-  每次构建后同步 `dist/`，但不能当作唯一入口。
+- **唯一正式渠道：GitHub Release**，README 的推荐路径以它为准。
+- **官方国内镜像已取消**：686 不再提供 nginx / `/srv/dsh/dist`，相关工具与文档已删除。
+  国内连不上 GitHub 时，用 Release 附件走“离线单文件”方式。
+- 安装器的 `DSH_MIRROR_BASE` 代码能力保留，仅供自建镜像使用，不承诺、不维护。
 - `git tag` 保留，用于回溯源码；`dist/` 保留，clone 即可用。
 
 ## 待办
 
-- [x] ~~Release 正文补镜像地址~~（2026-11-07 完成，正文已含镜像 + 验签说明）
 - [x] ~~Release 附件换成签名版~~（6 个附件：安装器、源码包、SHA256SUMS、SHA256SUMS.asc、公钥、体检脚本）
 - [ ] **正式机部署**：装完先跑 `smoke-remote.sh --full`，绿了再切流量。
 - [ ] **可选调优**：测试机 的 UDP 缓冲（`net.core.rmem_max`）、BBR。
-- [ ] **可选**：把镜像从 测试机 迁到新机器，测试机 继续当测试机。
 - [ ] **清理**：手机 v2rayNG 里的 `BADPIN-test` 节点。
 
 ## 发布纪律
 
-- 每次发布：`bash tools/build-release.sh`（自动签名）→ 传镜像 → Release 附件同步换新。
+- 每次发布：`bash tools/build-release.sh`（自动签名）→ 上传 GitHub Release 附件。
 - **签名私钥只在本机 `/root/.gnupg`**（release@dsh-deploy，指纹
   `8E25C6FC8FA01719137FAAE6BC9AF5236E467872`）。丢失就无法签新版本，建议离线备份。
-- 镜像与 Release 必须指向同一构建；换版本后 `sha256sum` 三处要对得上。
+- Release 附件必须与 `dist/` 指向同一构建；换版本后 `sha256sum` 要对得上。
 
 ## 已知限制（别忘）
 
@@ -103,4 +100,3 @@
   `t_install_completion`、两个 logrotate apt 用例）在 CI 里跳过；真实机器上由 `smoke-remote.sh` 覆盖。
 - `pinSHA256` 只有 V2rayNG 认，官方 hysteria 客户端不认；所以服务端自检里这项永远是 SKIP，
   真正的验证在客户端侧（已实测：坏 pin → 服务端零记录）。
-- 镜像只走 HTTP（无域名、无可信证书），信任锚是 GitHub 仓库或你单独保存的 SHA256。

@@ -19,9 +19,8 @@ Reality 走 TCP 适合下载和大流量，Hysteria2 走 UDP 适合语音、视�
 > 最小化系统可能没装 `curl` / `gnupg`（下载和验签要用）：
 > `apt-get update && apt-get install -y curl gnupg`
 
-> **发布渠道：以 GitHub Release 为准。** 镜像站 `http://64.205.110.102/`
-> 是测试机上的可选加速节点，可能随测试机重置而离线；镜像不可用时直接用
-> GitHub Release，不要把它当唯一入口。
+> **发布渠道：只有 GitHub Release。** 不再维护官方国内镜像；GitHub 连不上时，
+> 用下面的“离线单文件”方式，把 Release 附件传到服务器再装。
 
 **方式零：一条命令（全新 Debian 12，root）**
 
@@ -48,32 +47,13 @@ gpg --verify SHA256SUMS.asc SHA256SUMS && sha256sum -c SHA256SUMS --ignore-missi
 bash "$installer" --auto --with-hy2
 ```
 
-**方式二：国内镜像（可选加速，可能离线）**
-
-```bash
-curl -fsSL http://64.205.110.102/dsh-install.sh -o /tmp/dsh-install.sh
-sha256sum /tmp/dsh-install.sh          # 对比 SHA256SUMS
-DSH_MIRROR_BASE=http://64.205.110.102 bash /tmp/dsh-install.sh --auto --with-hy2
-```
-
-`DSH_MIRROR_BASE` 让 Xray 核心 zip、官方 `install-release.sh` 和 HY2 二进制也走镜像；
-不设置它时，这三样仍从 GitHub 下载（国内常连不上）。
-
-也可以走带验签的 bootstrap（只设 `DSH_BASE_URL`，它会自动把同一地址用作
-`DSH_MIRROR_BASE`）：
-
-```bash
-curl -fsSL http://64.205.110.102/dsh-bootstrap.sh -o /tmp/dsh-bootstrap.sh
-DSH_BASE_URL=http://64.205.110.102 bash /tmp/dsh-bootstrap.sh
-```
-
-**方式三：从源码安装（服务器能访问 GitHub）**
+**方式二：从源码安装（服务器能访问 GitHub）**
 
 ```bash
 git clone https://github.com/cc520go/dsh-deploy.git /tmp/dsh && cd /tmp/dsh && bash install.sh --auto --with-hy2
 ```
 
-**方式四：离线单文件（完全离线）**
+**方式三：离线单文件（完全离线）**
 
 把 `dsh-install-<DSH版本>.sh`（Release 附件）用 WinSCP / scp / 面板文件管理器上传，然后：
 
@@ -173,18 +153,6 @@ DSH status | version | check-update | backup | diag | logs | share
 ```
 
 ---
-
-## 自建镜像
-
-GitHub 在国内经常连不上，可以在自己的机器上放一份静态镜像：
-
-```bash
-curl -fsSL http://<你的地址>/dsh-install.sh -o /tmp/dsh-install.sh
-sha256sum /tmp/dsh-install.sh
-bash /tmp/dsh-install.sh --auto --with-hy2
-```
-
-部署方法见 `tools/mirror/README.md`（nginx，只提供 GET/HEAD，不含任何凭据）。
 
 ## 客户端怎么连
 

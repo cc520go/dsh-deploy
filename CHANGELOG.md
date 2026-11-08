@@ -2,6 +2,15 @@
 
 记录 DSH 脚本自身的版本；Xray 核心版本见 `VERSION`。
 
+## 未发布
+
+### 变更
+
+- 取消官方国内镜像：删除 `tools/mirror/`、README 的镜像安装方式，
+  构建产物不再生成 `index.html`；686 不再提供 nginx / `/srv/dsh/dist`。
+  GitHub Release 成为唯一发布渠道；国内连不上 GitHub 时用离线单文件安装。
+- 安装器的 `DSH_MIRROR_BASE` 代码能力保留，仅供自建镜像使用，不再承诺维护。
+
 ## 1.4.1 — 2026-11-08
 
 ### 修复

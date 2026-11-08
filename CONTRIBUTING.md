@@ -22,10 +22,10 @@ shellcheck -S error install.sh manage.sh diagnose.sh lib/*.sh
 ## 发布流程
 
 1. 改 `DSH_VERSION`（必要时改 `DSH_CODENAME`），更新 `CHANGELOG.md` 与 README 里的版本号。
-2. `tools/build-release.sh --with-tests` 生成 `dist/` 产物；**版本参数必须与 `DSH_VERSION` 一致**。
-   `dist/` 已被 `.gitignore` 忽略，只上传 Release/镜像，不要提交回仓库。
-3. 在持有 `release@dsh-deploy` 私钥的机器上签名，确认 `SHA256SUMS.asc` 可验。
-4. 上传镜像（可选加速）与 GitHub Release，两边 `sha256sum` 必须一致。
+2. `tools/build-release.sh` 生成并签名 `dist/` 产物；**版本参数必须与 `DSH_VERSION` 一致**。
+   `dist/` 已被 `.gitignore` 忽略，只上传 Release，不要提交回仓库。
+3. 确认 `SHA256SUMS.asc` 可验、`SHA256SUMS` 与 `dist/` 一致。
+4. 上传 GitHub Release（6 个附件）；不再维护官方国内镜像。
 5. 不要发布未签名产物；`--no-sign` 只用于本地测试。
 
 ## 文档

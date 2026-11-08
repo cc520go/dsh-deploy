@@ -67,4 +67,5 @@
 ## 发布
 
 源码在 GitHub；构建产物由 `tools/build-release.sh` 生成到 `dist/`，用离线私钥签名后发布。
-镜像站只是可选加速节点，正式渠道是 GitHub Release。详见 [CONTRIBUTING](../CONTRIBUTING.md)。
+正式渠道只有 GitHub Release；官方国内镜像已于 2026-11-08 取消，不再维护。
+详见 [CONTRIBUTING](../CONTRIBUTING.md)。
