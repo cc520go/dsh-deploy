@@ -369,6 +369,8 @@ node_set_sni() {
         new_sni="${new_sni:-www.apple.com}"
     fi
     validate_sni "${new_sni}" || return 1
+    # Keep Reality's two halves consistent: dest is the same domain on 443.
+    dest="${new_sni}:443"
     # Lightweight, warn-only precheck (camouflage case): DNS/TLS warnings
     # never block the change; the confirm below is the user's decision.
     # The local IP is passed only when the node host itself is an IP,
@@ -378,7 +380,7 @@ node_set_sni() {
         *.*.*.*) sni_local_ip="${host}" ;;
     esac
     sni_precheck "${new_sni}" "${dest}" "camouflage" "${sni_local_ip}" || true
-    confirm "Impact: SNI will change to ${new_sni}, the config will be rewritten (other node values preserved), the service will restart, and the old share link will stop working (clients must re-import the new link). A snapshot is taken first." || { log_info "SNI change cancelled."; return 1; }
+    confirm "Impact: SNI and dest will change to ${new_sni} / ${dest} (kept in sync), the config will be rewritten (other node values preserved), the service will restart, and the old share link will stop working (clients must re-import the new link). A snapshot is taken first." || { log_info "SNI change cancelled."; return 1; }
     # Temp config MUST end in .json: real Xray rejects a bare mktemp
     # file on format detection before content ("Failed to get format").
     local tmpdir tmpconf
@@ -929,9 +931,14 @@ menu() {
             5) cmd_rollback ;;
             6) cmd_backup ;;
             7)
-                printf '节点操作：show/init/share/sni/restore-main: '
+                node_show
+                printf '新伪装域名（直接输入域名即可修改 sni+dest；回车返回）: '
                 read -r ns || ns=""
-                cmd_node "${ns:-show}"
+                case "${ns}" in
+                    "") ;;
+                    init|share|restore-main) cmd_node "${ns}" ;;
+                    *) node_set_sni "${ns}" ;;
+                esac
                 ;;
             8) cmd_share ;;
             9)
