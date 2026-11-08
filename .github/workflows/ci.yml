@@ -59,7 +59,7 @@ jobs:
           rc=${PIPESTATUS[0]}
           if [[ "${rc}" -ne 0 ]]; then
             # Public Actions logs need auth; annotations are readable.
-            tail -n 25 /tmp/tests.log | while IFS= read -r line; do
+            grep -n -B2 -A8 '^FAIL' /tmp/tests.log | while IFS= read -r line; do
               echo "::error::${line}"
             done
             fails="$(grep -E '^(FAIL|Tests:)' /tmp/tests.log | tr '\n' ' ' | cut -c1-120)"
