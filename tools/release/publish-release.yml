@@ -1,0 +1,38 @@
+name: Publish release
+
+# One-shot release helper: pushing a release/** branch creates the GitHub
+# Release for the version in release-assets/RELEASE-TAG and uploads the
+# signed assets committed on that branch. Uses the repository's own
+# GITHUB_TOKEN, so no personal API token is needed.
+#
+# Usage: see tools/release/README.md
+on:
+  push:
+    branches: [release/**]
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$(tr -d '[:space:]' < release-assets/RELEASE-TAG)"
+          test -n "${tag}"
+          gh release create "${tag}" \
+            --title "DSH ${tag#v}「鲸潮」" \
+            --notes-file release-assets/RELEASE-NOTES.md \
+            --latest \
+            "release-assets/dsh-install-${tag#v}.sh" \
+            "release-assets/dsh-${tag#v}.tar.gz" \
+            release-assets/SHA256SUMS \
+            release-assets/SHA256SUMS.asc \
+            release-assets/dsh-signing-key.asc \
+            release-assets/smoke-remote.sh
