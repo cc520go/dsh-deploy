@@ -58,6 +58,10 @@ jobs:
           bash tests/run_tests.sh 2>&1 | tee /tmp/tests.log
           rc=${PIPESTATUS[0]}
           if [[ "${rc}" -ne 0 ]]; then
+            # Public Actions logs need auth; annotations are readable.
+            tail -n 25 /tmp/tests.log | while IFS= read -r line; do
+              echo "::error::${line}"
+            done
             fails="$(grep -E '^(FAIL|Tests:)' /tmp/tests.log | tr '\n' ' ' | cut -c1-120)"
             echo "失败用例：${fails}"
             if [[ -n "${GITHUB_TOKEN:-}" ]]; then
