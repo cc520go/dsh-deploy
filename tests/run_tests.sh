@@ -1739,6 +1739,146 @@ t_hy2_link_and_guard() {
     return 0
 }
 
+# menu 21 uninstall: HY2 first, then Xray; tool dir / logrotate / BBR+UDP
+# sysctl cleaned; snapshots + node.params kept; only purge deletes the state
+# dir. Runs in a subshell so the per-case path exports never leak into the
+# later tests (the sandbox-isolation guard runs right after this one).
+t_uninstall_menu21() {
+    (
+        # shellcheck disable=SC1091
+        source "${REPO_ROOT}/manage.sh" || exit 1
+        local case_name b stub
+        for case_name in keep purge; do
+            b="${SANDBOX}/uninstall-${case_name}"
+            rm -rf -- "${b}"
+            mkdir -p "${b}/bin" "${b}/etc/xray" "${b}/units" "${b}/share/dsh" \
+                "${b}/launchers" "${b}/logrotate.d" "${b}/sysctl.d" \
+                "${b}/dsh-state" "${b}/hy2/bin" "${b}/hy2/etc" "${b}/hy2/units" \
+                "${b}/hy2/client" "${b}/mirror/xray" "${b}/snapshots"
+
+            # --- fake installed state -----------------------------------
+            cp -a "${SANDBOX}/bin/xray" "${b}/bin/xray"
+            chmod 755 "${b}/bin/xray"
+            printf '{"inbounds":[]}\n' > "${b}/etc/xray/config.json"
+            printf '# fake xray.service\n' > "${b}/units/xray.service"
+            printf 'PLACEHOLDER-node-params\n' > "${b}/dsh-state/node.params"
+            printf '# yaml\n' > "${b}/hy2/etc/config.yaml"
+            : > "${b}/hy2/etc/.managed-by-hy2addon"
+            printf '# fake hysteria unit\n' > "${b}/hy2/units/hysteria-server.service"
+            printf '#!/usr/bin/env bash\n' > "${b}/hy2/bin/hysteria"
+            chmod 755 "${b}/hy2/bin/hysteria"
+            mkdir -p "${b}/snapshots/hy2-backup-old-2.13.0"
+            printf 'old hy2 snapshot\n' > "${b}/snapshots/hy2-backup-old-2.13.0/hysteria.bin"
+            mkdir -p "${b}/snapshots/xray-backup-old-1.0.0"
+            printf 'old xray snapshot\n' > "${b}/snapshots/xray-backup-old-1.0.0/xray.bin"
+
+            # --- files this tool owns -----------------------------------
+            printf '#!/usr/bin/env bash\n' > "${b}/share/dsh/manage.sh"
+            ln -s "${b}/share/dsh/manage.sh" "${b}/launchers/DSH"
+            printf '/var/log/xray/*.log {\n    daily\n}\n' > "${b}/logrotate.d/dsh"
+            printf 'net.ipv4.tcp_congestion_control=bbr\nnet.core.default_qdisc=fq\n' \
+                > "${b}/sysctl.d/99-dsh-bbr.conf"
+            printf '# DSH UDP tuning (HY2/QUIC needs bigger socket buffers)\nnet.core.rmem_max = 16777216\n' \
+                > "${b}/sysctl.d/99-dsh-udp.conf"
+
+            # --- fake official installer --------------------------------
+            # fetch_installer applies its pinned-hash check to mirror
+            # downloads too; XRAY_INSTALLER_SHA256 is its test override.
+            stub="${b}/mirror/xray/install-release.sh"
+            {
+                printf '#!/usr/bin/env bash\n'
+                printf 'log="${UNINSTALL_INSTALLER_LOG:?}"\n'
+                printf 'printf "args=%%s\\n" "$*" >> "$log"\n'
+                printf 'if [[ -e "${HY2_BIN:-/nonexistent}" ]]; then printf "hy2_present=1\\n" >> "$log"; else printf "hy2_present=0\\n" >> "$log"; fi\n'
+                printf 'if [[ "$1" == "remove" ]]; then\n'
+                printf '  rm -f -- "${XRAY_BIN}"\n'
+                printf '  if [[ "$2" == "--purge" ]]; then rm -rf -- "${XRAY_CONF_DIR}"; printf "mode=purge\\n" >> "$log"; else printf "mode=keep\\n" >> "$log"; fi\n'
+                printf '  exit 0\n'
+                printf 'fi\n'
+                printf 'exit 1\n'
+                # fetch_installer's sanity floor is 5000 bytes; these
+                # harmless xray/install comment lines clear it.
+                local i
+                for i in $(seq 1 200); do
+                    printf '# xray install uninstall test padding line %03d -- keep the stub above 5000 bytes\n' "${i}"
+                done
+            } > "${stub}"
+            chmod 755 "${stub}"
+
+            # --- redirect every path this tool touches -------------------
+            export XRAY_BIN="${b}/bin/xray"
+            export XRAY_CONF_DIR="${b}/etc/xray"
+            export XRAY_CONF="${b}/etc/xray/config.json"
+            export XRAY_UNIT_DIR="${b}/units"
+            export XRAY_SHARE_DIR="${b}/share/xray"
+            export XRAY_LOG_DIR="${b}/log/xray"
+            export SNAPSHOT_PARENT="${b}/snapshots"
+            export DSH_STATE_DIR="${b}/dsh-state"
+            export NODE_PARAMS_FILE="${b}/dsh-state/node.params"
+            export LAUNCHER_DIR="${b}/launchers"
+            export TOOL_INSTALL_DIR="${b}/share/dsh"
+            export LEGACY_TOOL_DIR="${b}/share/legacy-dsh"
+            export LOGROTATE_DIR="${b}/logrotate.d"
+            export BBR_SYSCTL_FILE="${b}/sysctl.d/99-dsh-bbr.conf"
+            export BBR_LEGACY_SYSCTL_FILE="${b}/sysctl.d/99-lisa-bbr.conf"
+            export BBR_BACKUP_DIR="${b}/dsh-state/bbr-backups"
+            export BBR_LEGACY_ONESHOT_UNIT="${b}/units/lisa-bbr3-oneshot.service"
+            export HY2_BIN="${b}/hy2/bin/hysteria"
+            export HY2_CONF_DIR="${b}/hy2/etc"
+            export HY2_CONF="${b}/hy2/etc/config.yaml"
+            export HY2_UNIT_DIR="${b}/hy2/units"
+            export HY2_UNIT="${b}/hy2/units/hysteria-server.service"
+            export HY2_MARKER="${b}/hy2/etc/.managed-by-hy2addon"
+            export HY2_CLIENT_DIR="${b}/hy2/client"
+            export HY2_SNAPSHOT_PARENT="${b}/snapshots"
+            export HY2_UDP_SYSCTL_FILE="${b}/sysctl.d/99-dsh-udp.conf"
+            export HY2_USER="dsh-ittest"
+            export DSH_MIRROR_BASE="file://${b}/mirror"
+            export XRAY_INSTALLER_SHA256
+            XRAY_INSTALLER_SHA256="$(sha256sum "${stub}" | cut -d' ' -f1)"
+            export UNINSTALL_INSTALLER_LOG="${b}/installer.log"
+
+            if [[ "${case_name}" == "purge" ]]; then
+                printf 'y\nyes\n' | cmd_uninstall >/dev/null 2>&1 || exit 1
+            else
+                printf 'n\n' | cmd_uninstall >/dev/null 2>&1 || exit 1
+            fi
+
+            # --- HY2 went first, Xray existed when the installer ran ----
+            grep -qx 'hy2_present=0' "${UNINSTALL_INSTALLER_LOG}" || exit 1
+            # --- HY2 is gone, its snapshot is kept ----------------------
+            [[ ! -e "${HY2_BIN}" && ! -d "${HY2_CONF_DIR}" ]] || exit 1
+            [[ ! -e "${HY2_UNIT}" ]] || exit 1
+            [[ -d "${b}/snapshots/hy2-backup-old-2.13.0" ]] || exit 1
+            # --- core removed, snapshots kept ---------------------------
+            [[ ! -e "${XRAY_BIN}" ]] || exit 1
+            [[ -d "${b}/snapshots/xray-backup-old-1.0.0" ]] || exit 1
+            ls -d "${b}/snapshots"/xray-backup-* >/dev/null 2>&1 || exit 1
+            # --- tool dir / launcher / logrotate / sysctl cleaned --------
+            [[ ! -e "${TOOL_INSTALL_DIR}" ]] || exit 1
+            [[ ! -L "${LAUNCHER_DIR}/DSH" ]] || exit 1
+            [[ ! -f "${LOGROTATE_DIR}/dsh" ]] || exit 1
+            [[ ! -f "${BBR_SYSCTL_FILE}" ]] || exit 1
+            [[ ! -f "${HY2_UDP_SYSCTL_FILE}" ]] || exit 1
+
+            if [[ "${case_name}" == "purge" ]]; then
+                grep -qx 'mode=purge' "${UNINSTALL_INSTALLER_LOG}" || exit 1
+                [[ ! -e "${DSH_STATE_DIR}" ]] || exit 1
+                [[ ! -e "${NODE_PARAMS_FILE}" ]] || exit 1
+                [[ ! -e "${XRAY_CONF_DIR}" ]] || exit 1
+            else
+                grep -qx 'mode=keep' "${UNINSTALL_INSTALLER_LOG}" || exit 1
+                [[ -f "${NODE_PARAMS_FILE}" ]] || exit 1
+                grep -qx 'PLACEHOLDER-node-params' "${NODE_PARAMS_FILE}" || exit 1
+                [[ -d "${DSH_STATE_DIR}" ]] || exit 1
+                [[ -f "${XRAY_CONF_DIR}/config.json" ]] || exit 1
+            fi
+        done
+        exit 0
+    ) || return 1
+    return 0
+}
+
 run_test t_version
 run_test t_dgst
 run_test t_urlencode
@@ -1810,6 +1950,7 @@ run_test t_logrotate_smart_install_apt_success
 run_test t_logrotate_smart_install_apt_failure
 fi
 run_test t_logrotate_test_mode_no_real_apt
+run_test t_uninstall_menu21
 run_test t_test_sandbox_isolation
 
 printf '================================\n'

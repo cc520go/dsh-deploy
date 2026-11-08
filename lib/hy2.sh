@@ -34,6 +34,9 @@ HY2_USER="${HY2_USER:-hysteria}"
 HY2_SNAPSHOT_PARENT="${HY2_SNAPSHOT_PARENT:-${SNAPSHOT_PARENT:-/root}}"
 HY2_SNAPSHOT_PREFIX="hy2-backup-"
 HY2_SNAPSHOT_KEEP="${HY2_SNAPSHOT_KEEP:-5}"
+# UDP buffer tuning lives in its own sysctl.d file; overridable so tests
+# never touch the real /etc/sysctl.d.
+HY2_UDP_SYSCTL_FILE="${HY2_UDP_SYSCTL_FILE:-/etc/sysctl.d/99-dsh-udp.conf}"
 HY2_VERSIONS_FILE="${HY2_VERSIONS_FILE:-$(dirname "${_HY2LIB_DIR}")/versions-hy2.conf}"
 
 # Fixed design values (v5 §1/§4). Not menu options on purpose.
@@ -505,7 +508,7 @@ EOF
 # test node, the 4-stream median went 168 -> 185 Mbps after this. Written
 # as its own sysctl.d file so it can be removed cleanly.
 hy2_tune_udp() {
-    local f="/etc/sysctl.d/99-dsh-udp.conf"
+    local f="${HY2_UDP_SYSCTL_FILE}"
     if [[ "${XRAY_TEST_MODE:-0}" == "1" ]]; then
         return 0
     fi
@@ -523,7 +526,7 @@ hy2_tune_udp() {
 }
 
 hy2_untune_udp() {
-    local f="/etc/sysctl.d/99-dsh-udp.conf"
+    local f="${HY2_UDP_SYSCTL_FILE}"
     if [[ -f "${f}" ]] && grep -q "DSH UDP tuning" "${f}" 2>/dev/null; then
         rm -f -- "${f}"
         sysctl --system >/dev/null 2>&1 || true
@@ -714,13 +717,27 @@ hy2_cmd_install() {
     return 0
 }
 
+# hy2_cmd_uninstall [--yes] [--keep-snapshots]
+#   --yes              skip this function's own confirmation (menu 21 already
+#                      confirmed the whole uninstall)
+#   --keep-snapshots   keep hy2-backup-* without asking (menu 21 keeps every
+#                      snapshot on purpose; deleting them is its own question)
 hy2_cmd_uninstall() {
-    local keep
+    local keep keep_snapshots=0 assume_yes=0
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --yes|-y) assume_yes=1 ;;
+            --keep-snapshots) keep_snapshots=1 ;;
+            *) die "hy2 uninstall: 未知参数 '$1'（支持 --yes --keep-snapshots）"; return 1 ;;
+        esac
+        shift
+    done
     hy2_installed || { [[ -d "${HY2_CONF_DIR}" ]] || { log_info "HY2 没装，什么都不用做。"; return 0; }; }
     if ! hy2_marker_present; then
         die "${HY2_CONF_DIR} 没有本项目标记文件，判断不是本项目装的，拒绝删。"; return 1
     fi
-    if ! confirm "将停止并删除 HY2：服务、二进制、配置、证书、客户端链接、标记文件。主线 VLESS/Reality 完全不动。"; then
+    if [[ "${assume_yes}" -eq 0 ]] \
+        && ! confirm "将停止并删除 HY2：服务、二进制、配置、证书、客户端链接、标记文件。主线 VLESS/Reality 完全不动。"; then
         log_info "已取消。"; return 0
     fi
     run_systemctl stop "${HY2_SERVICE}" >/dev/null 2>&1 || true
@@ -732,16 +749,20 @@ hy2_cmd_uninstall() {
     rm -rf -- "${HY2_CLIENT_DIR}" 2>/dev/null || true
     id -u "${HY2_USER}" >/dev/null 2>&1 && userdel "${HY2_USER}" 2>/dev/null || true
 
-    printf '要不要顺手删掉 HY2 快照（含明文凭据）？输入 yes 删除，其他保留： '
-    read -r keep || keep=""
-    if [[ "${keep}" == "yes" ]]; then
-        local d
-        while IFS= read -r d; do
-            [[ -n "${d}" ]] && rm -rf -- "${d}"
-        done < <(hy2_snapshot_list)
-        log_info "HY2 快照已删除。"
-    else
+    if [[ "${keep_snapshots}" -eq 1 ]]; then
         log_info "HY2 快照保留在 ${HY2_SNAPSHOT_PARENT}（hy2-backup-*）。"
+    else
+        printf '要不要顺手删掉 HY2 快照（含明文凭据）？输入 yes 删除，其他保留： '
+        read -r keep || keep=""
+        if [[ "${keep}" == "yes" ]]; then
+            local d
+            while IFS= read -r d; do
+                [[ -n "${d}" ]] && rm -rf -- "${d}"
+            done < <(hy2_snapshot_list)
+            log_info "HY2 快照已删除。"
+        else
+            log_info "HY2 快照保留在 ${HY2_SNAPSHOT_PARENT}（hy2-backup-*）。"
+        fi
     fi
     hy2_untune_udp || true
     log_info "HY2 已卸载，主线节点未受影响。"
@@ -931,7 +952,7 @@ hy2_cmd() {
     shift || true
     case "${sub}" in
         install) hy2_cmd_install "$@" ;;
-        uninstall) hy2_cmd_uninstall ;;
+        uninstall) hy2_cmd_uninstall "$@" ;;
         link) hy2_cmd_link ;;
         status) hy2_cmd_status ;;
         logs) hy2_cmd_logs "$@" ;;

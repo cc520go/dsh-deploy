@@ -2,6 +2,21 @@
 
 记录 DSH 脚本自身的版本；Xray 核心版本见 `VERSION`。
 
+## 未发布
+
+### 修复
+
+- 菜单 21 卸载顺序与清理范围：先卸载 HY2（服务、二进制、配置、证书），
+  再通过官方安装器卸载 Xray；随后清理 `DSH`/`lisa` 启动器、工具目录
+  `/usr/local/share/dsh`、每日体检定时器、`/etc/logrotate.d/dsh`，以及
+  BBR、UDP 的 sysctl 文件（运行时尽量回到 `cubic`/`fq_codel`）。
+- 快照（`xray-backup-*`、`hy2-backup-*`）与 `node.params` 默认一律保留；
+  purge 额外删除状态目录 `/root/.dsh-deploy`（node.params、BBR 备份），
+  官方安装器的 `remove --purge` 仍按原语义删除 Xray 配置目录，快照不删。
+- HY2 卸载新增 `--yes`（菜单 21 已确认）与 `--keep-snapshots`（快照保留、
+  不再二次询问），部分安装或非本项目创建的 `/etc/hysteria` 不会阻塞 Xray 卸载。
+- 新增回归测试 `t_uninstall_menu21`，覆盖保留与 purge 两条路径。
+
 ## 1.4.0 — 2026-11-08
 
 ### 新增

@@ -797,29 +797,67 @@ cmd_logs() {
     return 0
 }
 
+# _uninstall_rm_tree <path> <label>: remove a tree this tool owns, but never
+# an obviously dangerous path (empty, /, or a system parent dir). Non-fatal.
+_uninstall_rm_tree() {
+    local p="$1" label="$2"
+    case "${p}" in
+        ""|/|/root|/root/|/etc|/etc/|/usr|/usr/|/usr/local|/usr/local/|\
+        /usr/local/share|/usr/local/share/|/usr/local/bin|/usr/local/bin/|\
+        /var|/var/|/var/log|/var/log/)
+            log_warn "refusing to remove ${label}: unsafe path '${p}'"
+            return 0
+            ;;
+    esac
+    [[ -e "${p}" || -L "${p}" ]] || return 0
+    if rm -rf -- "${p}"; then
+        log_info "${label} removed: ${p}"
+    else
+        log_warn "could not remove ${label}: ${p}"
+    fi
+    return 0
+}
+
+# cmd_uninstall (menu 21): uninstall HY2 FIRST (it is an add-on and must not
+# outlive the parent install), then the Xray core via the official installer.
+# Then clean everything this tool installed: launchers, tool dir, daily-smoke
+# timer, logrotate rule, BBR/UDP sysctl files. Snapshots (xray-backup-*,
+# hy2-backup-*) and node.params are KEPT; only a triple-confirmed purge
+# deletes the state dir.
 cmd_uninstall() {
-    local purge=0 ans ans2
-    confirm "Impact: this removes the xray binary, systemd units, geodata, and the 'DSH' launcher. Your node config is KEPT by default. A snapshot backup is taken first." || { log_info "uninstall cancelled."; return 1; }
-    printf 'Also delete the node config directory (purge)? [y/N]: '
+    local purge=0 ans ans2 lrdir f link target
+    confirm "Impact: HY2 is removed first (service, binary, config, certs), then Xray (binary, units, geodata) and everything this tool installed: launchers, tool dir, logrotate rule, BBR/UDP sysctl. Snapshots and node.params are KEPT. A snapshot backup is taken first." || { log_info "uninstall cancelled."; return 1; }
+    printf 'Also delete the DSH state dir %s (node.params, BBR backups)? [y/N]: ' "${DSH_STATE_DIR}"
     read -r ans || ans=""
     case "${ans}" in
         y|Y|yes|YES)
             # Purge needs three affirmatives: this prompt, the confirm
-            # below, and the re-typed "yes". Any decline keeps the config.
-            if confirm "Impact: PURGE will delete the entire config directory ${XRAY_CONF_DIR} including your node config. This cannot be undone except from a snapshot."; then
-                printf 'Type "yes" again to confirm PURGE (delete config dir): '
+            # below, and the re-typed "yes". Any decline keeps the state.
+            if confirm "Impact: PURGE will delete ${DSH_STATE_DIR} (node.params, BBR backups) and the official installer will also remove ${XRAY_CONF_DIR}/config.json. Snapshots are still kept, but this state cannot be restored except from a snapshot."; then
+                printf 'Type "yes" again to confirm PURGE (delete state dir): '
                 read -r ans2 || ans2=""
                 if [[ "${ans2}" == "yes" ]]; then
                     purge=1
                 else
-                    log_info "purge not confirmed; continuing with config kept."
+                    log_info "purge not confirmed; continuing with state kept."
                 fi
             else
-                log_info "purge declined; continuing with config kept."
+                log_info "purge declined; continuing with state kept."
             fi
             ;;
     esac
     snapshot_create >/dev/null || true
+
+    # 1) HY2 first. --yes: menu 21 already confirmed the whole uninstall.
+    # --keep-snapshots: menu 21 keeps every snapshot on purpose, and a
+    # foreign/partial HY2 must never block the Xray uninstall (its marker
+    # check refuses to delete a directory this tool does not own).
+    if ! hy2_cmd_uninstall --yes --keep-snapshots; then
+        log_warn "HY2 未完全卸载（多半是 ${HY2_CONF_DIR} 没有本项目标记，已按设计拒绝删除）；继续卸载 Xray，残留请手动处理。"
+    fi
+    hy2_untune_udp || true
+
+    # 2) Xray itself, through the official installer (never curl|bash).
     service_stop || true
     run_systemctl disable xray || true
     local tmpdir installer
@@ -832,18 +870,55 @@ cmd_uninstall() {
     else
         bash "${installer}" remove || { die "official uninstall failed."; return 1; }
     fi
-    local link="${LAUNCHER_DIR}/${LAUNCHER_NAME}"
-    if [[ -L "${link}" && "$(readlink "${link}")" == "${SCRIPT_DIR}/manage.sh" ]]; then
-        rm -f -- "${link}" || true
-        log_info "launcher removed: ${link}"
-    fi
-    # 顺手清掉每日体检定时器（它只属于本工具）。
+
+    # 3) Launchers: current DSH and the retired lisa alias; only when the
+    # symlink really points at one of this tool's copies.
+    for link in "${LAUNCHER_DIR}/${LAUNCHER_NAME}" "${LAUNCHER_DIR}/${LEGACY_LAUNCHER_NAME}"; do
+        [[ -L "${link}" ]] || continue
+        target="$(readlink "${link}" 2>/dev/null || printf '')"
+        case "${target}" in
+            "${SCRIPT_DIR}/manage.sh"|"${TOOL_INSTALL_DIR}/manage.sh"|"${LEGACY_TOOL_DIR}/manage.sh")
+                rm -f -- "${link}" && log_info "launcher removed: ${link}"
+                ;;
+        esac
+    done
+
+    # 4) 每日体检定时器（它只属于本工具）。
     if [[ "${XRAY_TEST_MODE:-0}" != "1" ]]; then
         run_systemctl disable --now dsh-smoke.timer >/dev/null 2>&1 || true
         rm -f /etc/systemd/system/dsh-smoke.timer /etc/systemd/system/dsh-smoke.service 2>/dev/null || true
         run_systemctl daemon-reload >/dev/null 2>&1 || true
     fi
-    log_info "uninstall complete (snapshot kept for recovery)."
+
+    # 5) logrotate 规则；只删内容确实是本工具的那一份。
+    lrdir="${LOGROTATE_DIR:-/etc/logrotate.d}"
+    for f in "${lrdir}/dsh" "${lrdir}/xray-reality-manager"; do
+        [[ -f "${f}" ]] || continue
+        if grep -q '/var/log/xray/\*\.log' "${f}" 2>/dev/null; then
+            rm -f -- "${f}" && log_info "logrotate rule removed: ${f}"
+        fi
+    done
+
+    # 6) sysctl：BBR 由 bbr 模块清理（含运行时回到 cubic/fq_codel），
+    #    UDP 缓冲在 HY2 卸载里已经清过，这里兜底再跑一次（幂等）。
+    _bbr_lib
+    bbr_remove_persisted || log_warn "BBR sysctl 清理未完成，请检查 ${BBR_SYSCTL_FILE}。"
+    hy2_untune_udp || true
+
+    # 7) 工具目录：当前目录和 1.0.x 的旧目录（只删确实是本工具的那份）。
+    _uninstall_rm_tree "${TOOL_INSTALL_DIR}" "tool dir"
+    if [[ "${LEGACY_TOOL_DIR}" != "${TOOL_INSTALL_DIR}" && -f "${LEGACY_TOOL_DIR}/manage.sh" ]]; then
+        _uninstall_rm_tree "${LEGACY_TOOL_DIR}" "legacy tool dir"
+    fi
+
+    # 8) purge 只删状态目录（node.params、BBR 备份）；快照永远保留。
+    if [[ "${purge}" -eq 1 ]]; then
+        _uninstall_rm_tree "${DSH_STATE_DIR}" "state dir"
+        log_info "purge complete: state dir deleted (node.params and BBR backups are gone)."
+    else
+        log_info "state kept: ${DSH_STATE_DIR} (node.params, BBR backups)."
+    fi
+    log_info "uninstall complete. Snapshots kept: ${SNAPSHOT_PARENT}/xray-backup-*, ${HY2_SNAPSHOT_PARENT}/hy2-backup-*."
     return 0
 }
 

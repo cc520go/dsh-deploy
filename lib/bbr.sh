@@ -245,17 +245,18 @@ bbr_status() {
     return 1
 }
 
-# bbr_clear: remove the persisted file, reload sysctl, revert fq to fq_codel.
-# Does NOT uninstall a kernel; the official kernel stays as-is.
-bbr_clear() {
+# bbr_remove_persisted: delete the DSH BBR sysctl files (after copying them
+# into the BBR backup dir), drop a stale BBRv3 oneshot unit, reload sysctl
+# and reset the two runtime values to the Debian defaults. No confirmation
+# here: bbr_clear and menu 21 uninstall already asked their own question.
+# Never uninstalls a kernel. Prints nothing; logs the backup path.
+bbr_remove_persisted() {
     local stamp bdir f iface prev_tc
     f="$(bbr_current_sysctl_file)"
-    if [[ ! -f "${f}" && ! -f "${BBR_LEGACY_ONESHOT_UNIT}" ]]; then
-        log_info "no DSH BBR sysctl file; nothing to clear."
+    if [[ ! -f "${BBR_SYSCTL_FILE}" && ! -f "${BBR_LEGACY_SYSCTL_FILE}" \
+        && ! -f "${BBR_LEGACY_ONESHOT_UNIT}" ]]; then
         return 0
     fi
-    confirm "Impact: 删除 DSH 的 BBR sysctl 文件并重载 sysctl（新连接的 congestion/qdisc 回到系统默认）；不会卸载内核。运行中的 qdisc 会尽量立即恢复 fq_codel。" \
-        || { log_info "BBR clear cancelled."; return 1; }
     stamp="$(bbr_stamp)"
     bdir="$(bbr_backup_dir "${stamp}")" || return 1
     if [[ -f "${f}" ]]; then
@@ -288,6 +289,21 @@ bbr_clear() {
             log_warn "tc revert to ${prev_tc} on ${iface} failed; runtime qdisc reverts on reboot (sysctl file is already deleted)."
         fi
     fi
-    log_info "BBR 网络优化已清除（备份: ${bdir}）。"
+    log_info "BBR sysctl 已删除（备份: ${bdir}）；运行时已尽量恢复 cubic/fq_codel。"
+    return 0
+}
+
+# bbr_clear: remove the persisted file, reload sysctl, revert fq to fq_codel.
+# Does NOT uninstall a kernel; the official kernel stays as-is.
+bbr_clear() {
+    local f
+    f="$(bbr_current_sysctl_file)"
+    if [[ ! -f "${f}" && ! -f "${BBR_LEGACY_ONESHOT_UNIT}" ]]; then
+        log_info "no DSH BBR sysctl file; nothing to clear."
+        return 0
+    fi
+    confirm "Impact: 删除 DSH 的 BBR sysctl 文件并重载 sysctl（新连接的 congestion/qdisc 回到系统默认）；不会卸载内核。运行中的 qdisc 会尽量立即恢复 fq_codel。" \
+        || { log_info "BBR clear cancelled."; return 1; }
+    bbr_remove_persisted || return 1
     return 0
 }

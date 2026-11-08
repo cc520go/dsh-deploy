@@ -125,6 +125,7 @@ gpg --verify SHA256SUMS.asc SHA256SUMS && sha256sum -c SHA256SUMS --ignore-missi
   运维
    9 状态检查     10 线路诊断
   11 查看日志     12 BBR+FQ
+  21 卸载整机
   Hysteria2（附加协议）
   13 安装/升级    14 卸载
   15 查看链接     16 状态/重启
@@ -133,6 +134,8 @@ gpg --verify SHA256SUMS.asc SHA256SUMS && sha256sum -c SHA256SUMS --ignore-missi
 ```
 
 - **12 BBR+FQ**：只对官方内核设置 `congestion=bbr` + `qdisc=fq`，立即生效并持久化；不安装第三方内核、不重启、不改 Xray。
+- **21 卸载整机**：先卸 HY2（服务、二进制、配置、证书），再走官方安装器卸 Xray；随后清理启动器、工具目录、每日体检定时器、logrotate 规则和 BBR/UDP sysctl。
+  快照（`xray-backup-*`、`hy2-backup-*`）和 `node.params` 默认保留；只有连续三次确认的 purge 才删状态目录 `/root/.dsh-deploy`，并按官方 `--purge` 语义删除 Xray 配置目录。
 - **13 安装/升级**：没装就是全新安装；已装就是自定义升级（输版本号 → 快照 → 校验 → 配置测试 → 重启，失败自动回滚）。
 - **14 卸载**：只删 HY2 自己的东西，主线不动；会问一次要不要删快照。
 - **15 查看链接**：打印 V2rayNG 链接并写入 `/root/.hy2-client/v2rayng.txt`（600）。
