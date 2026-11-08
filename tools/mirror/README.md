@@ -27,9 +27,26 @@ cp dist/lisa-install-<版本>.sh /srv/dsh/dist/lisa-install.sh   # 稳定别名
 ## 用法
 
 ```bash
-curl -fsSL http://<你的地址>/lisa-install.sh -o /tmp/lisa-install.sh
-sha256sum /tmp/lisa-install.sh      # 对比 SHA256SUMS
-bash /tmp/lisa-install.sh --auto --with-hy2
+curl -fsSL http://<你的地址>/dsh-install.sh -o /tmp/dsh-install.sh
+sha256sum /tmp/dsh-install.sh      # 对比 SHA256SUMS
+DSH_MIRROR_BASE=http://<你的地址> bash /tmp/dsh-install.sh --auto --with-hy2
+```
+
+`DSH_MIRROR_BASE` 是必须的：没有它，安装器还会去 GitHub 下载 Xray 核心、
+官方 `install-release.sh` 和 HY2 二进制。本镜像已经在这些路径下提供：
+
+```text
+/xray/install-release.sh
+/xray/v<VERSION>/Xray-linux-64.zip(.dgst)
+/xray/v<VERSION>/Xray-linux-arm64-v8a.zip(.dgst)
+/hysteria/v<HY2>/hysteria-linux-{amd64,amd64-avx,arm64}
+```
+
+也可以走 bootstrap（只设 `DSH_BASE_URL`，它会自动推导 `DSH_MIRROR_BASE`）：
+
+```bash
+curl -fsSL http://<你的地址>/dsh-bootstrap.sh -o /tmp/dsh-bootstrap.sh
+DSH_BASE_URL=http://<你的地址> bash /tmp/dsh-bootstrap.sh
 ```
 
 ## 安全边界（说实话）

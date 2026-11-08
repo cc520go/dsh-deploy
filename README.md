@@ -50,7 +50,18 @@ bash dsh-install-1.4.1.sh --auto --with-hy2
 ```bash
 curl -fsSL http://64.205.110.102/dsh-install.sh -o /tmp/dsh-install.sh
 sha256sum /tmp/dsh-install.sh          # 对比 SHA256SUMS
-bash /tmp/dsh-install.sh --auto --with-hy2
+DSH_MIRROR_BASE=http://64.205.110.102 bash /tmp/dsh-install.sh --auto --with-hy2
+```
+
+`DSH_MIRROR_BASE` 让 Xray 核心 zip、官方 `install-release.sh` 和 HY2 二进制也走镜像；
+不设置它时，这三样仍从 GitHub 下载（国内常连不上）。
+
+也可以走带验签的 bootstrap（只设 `DSH_BASE_URL`，它会自动把同一地址用作
+`DSH_MIRROR_BASE`）：
+
+```bash
+curl -fsSL http://64.205.110.102/dsh-bootstrap.sh -o /tmp/dsh-bootstrap.sh
+DSH_BASE_URL=http://64.205.110.102 bash /tmp/dsh-bootstrap.sh
 ```
 
 **方式三：从源码安装（服务器能访问 GitHub）**

@@ -22,7 +22,10 @@
 <h2>一条命令安装</h2>
 <pre>curl -fsSL http://64.205.110.102/dsh-install.sh -o /tmp/dsh-install.sh \
   &amp;&amp; sha256sum /tmp/dsh-install.sh \
-  &amp;&amp; bash /tmp/dsh-install.sh --auto --with-hy2</pre>
+  &amp;&amp; DSH_MIRROR_BASE=http://64.205.110.102 bash /tmp/dsh-install.sh --auto --with-hy2</pre>
+<p class="muted"><code>DSH_MIRROR_BASE</code> 让 Xray 核心、官方安装器和 HY2 二进制也走本镜像。
+也可以走验签 bootstrap：<code>DSH_BASE_URL=http://64.205.110.102 bash /tmp/dsh-bootstrap.sh</code>
+（会自动把同一地址用作 <code>DSH_MIRROR_BASE</code>）。</p>
 <h2>先验签再看内容（推荐）</h2>
 <pre>curl -fsSLO http://64.205.110.102/SHA256SUMS
 curl -fsSLO http://64.205.110.102/SHA256SUMS.asc

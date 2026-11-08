@@ -22,6 +22,8 @@
 # Environment overrides (mainly for testing):
 #   DSH_INSTALL_ARGS   default: --auto --with-hy2
 #   DSH_BASE_URL       default: https://github.com/cc520go/dsh-deploy/releases/latest/download
+#   DSH_MIRROR_BASE    default: derived from a non-GitHub DSH_BASE_URL (static mirror);
+#                      set explicitly to override
 #   DSH_KEY_FPR        expected signing-key fingerprint
 
 set -euo pipefail
@@ -31,6 +33,15 @@ export LC_ALL
 REPO="${DSH_REPO:-cc520go/dsh-deploy}"
 BASE="${DSH_BASE_URL:-https://github.com/${REPO}/releases/latest/download}"
 KEY_FPR="${DSH_KEY_FPR:-8E25C6FC8FA01719137FAAE6BC9AF5236E467872}"
+# A static DSH mirror hosts the release assets and the Xray/HY2 assets under
+# the same base. Derive DSH_MIRROR_BASE from DSH_BASE_URL for such mirrors so
+# the installer downloads the core, the official installer and HY2 from the
+# mirror too (GitHub release URLs and GitHub proxies do not have that layout,
+# so only non-GitHub bases are auto-detected).
+if [[ -z "${DSH_MIRROR_BASE:-}" && "${BASE}" != *github.com* ]]; then
+    DSH_MIRROR_BASE="${BASE%/}"
+    export DSH_MIRROR_BASE
+fi
 WORK="$(mktemp -d)"
 trap 'rm -rf -- "${WORK}"' EXIT
 
