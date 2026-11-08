@@ -138,7 +138,11 @@ if [[ "${FULL}" -eq 1 ]]; then
     else
         pw="$(tr -d '[:space:]' < "${HY2_CONF_DIR}/.password" 2>/dev/null || true)"
         pin="$(openssl x509 -in "${HY2_CERT}" -outform der 2>/dev/null | sha256sum | cut -d' ' -f1)"
-        sni="$(awk -F': *' '/^[[:space:]]*sni:/{print $2; exit}' "${HY2_CONF}" 2>/dev/null || true)"
+        # Prefer the persisted SNI set by menu 20; fall back to config/bing.
+        sni_file="${DSH_STATE_DIR:-/root/.dsh-deploy}/hy2.sni"
+        sni=""
+        [[ -f "${sni_file}" ]] && sni="$(tr -d '[:space:]' < "${sni_file}" 2>/dev/null || true)"
+        [[ -n "${sni}" ]] || sni="$(awk -F': *' '/^[[:space:]]*sni:/{print $2; exit}' "${HY2_CONF}" 2>/dev/null || true)"
         sni="${sni:-www.bing.com}"
         # Talk to the local listener (it binds *:PORT), not the public IP:
         # avoids NAT hairpin puzzles and tests the same server instance.
