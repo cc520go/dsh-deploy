@@ -43,7 +43,7 @@ HY2_SNI_FILE="${HY2_SNI_FILE:-${DSH_STATE_DIR}/hy2.sni}"
 if [[ -z "${HY2_SNI:-}" && -f "${HY2_SNI_FILE}" ]]; then
     HY2_SNI="$(tr -d '[:space:]' < "${HY2_SNI_FILE}" 2>/dev/null || true)"
 fi
-HY2_SNI="${HY2_SNI:-www.bing.com}"
+HY2_SNI="${HY2_SNI:-www.apple.com}"
 HY2_BW_UP="${HY2_BW_UP:-50}"
 HY2_BW_DOWN="${HY2_BW_DOWN:-250}"
 HY2_CERT_DAYS="${HY2_CERT_DAYS:-36500}"
@@ -842,33 +842,33 @@ hy2_validate_sni() {
 # hy2_set_sni <domain>: persist SNI, reissue the leaf cert, restart HY2 and
 # regenerate the client link (the pin changes, so old links stop working).
 hy2_set_sni() {
-    local domain="${1:-}" old="${HY2_SNI}" pw pin ip link snap
+    local domain="${1:-}" old="${HY2_SNI}" pw pin ip link snap url
     hy2_validate_sni "${domain}" || { die "伪装域名不合法: ${domain}（只接受公网域名，不带协议/端口/路径）"; return 1; }
+    url="https://${domain}"
+    hy2_validate_masquerade_url "${url}" || { die "伪装页面地址不合法: ${url}"; return 1; }
     hy2_installed || { die "HY2 还没装。先走菜单 13。"; return 1; }
+    pw="$(hy2_read_password)" || { die "找不到密码文件"; return 1; }
+    ip="$(hy2_public_ip || true)"
     snap="$(hy2_snapshot_create 2>/dev/null || true)"
     printf '%s\n' "${domain}" > "${HY2_SNI_FILE}" || { die "无法写入 ${HY2_SNI_FILE}"; return 1; }
     chmod 600 "${HY2_SNI_FILE}" 2>/dev/null || true
     HY2_SNI="${domain}"
-    if ! hy2_gen_cert; then
-        printf '%s\n' "${old}" > "${HY2_SNI_FILE}"
-        HY2_SNI="${old}"
+    if ! hy2_gen_cert || ! hy2_write_config "${pw}" "${ip}" "${url}"; then
+        printf '%s\n' "${old}" > "${HY2_SNI_FILE}"; HY2_SNI="${old}"
+        [[ -n "${snap}" ]] && hy2_snapshot_restore "${snap}" || true
         return 1
     fi
-    if ! run_systemctl restart "${HY2_SERVICE}"; then
-        printf '%s\n' "${old}" > "${HY2_SNI_FILE}"
-        HY2_SNI="${old}"
-        hy2_gen_cert || true
-        run_systemctl restart "${HY2_SERVICE}" >/dev/null 2>&1 || true
-        die "HY2 重启失败，已回滚 SNI 到 ${old}。"
+    hy2_fix_perms
+    if ! hy2_config_test || ! run_systemctl restart "${HY2_SERVICE}"; then
+        printf '%s\n' "${old}" > "${HY2_SNI_FILE}"; HY2_SNI="${old}"
+        [[ -n "${snap}" ]] && hy2_snapshot_restore "${snap}" || true
+        die "HY2 配置/重启失败，已回滚到 ${old}。"
         return 1
     fi
-    pw="$(hy2_read_password)" || { die "找不到密码文件"; return 1; }
     pin="$(hy2_cert_pin)" || { die "读证书指纹失败"; return 1; }
-    ip="$(hy2_public_ip || true)"
-    [[ -z "${ip}" ]] && ip="<你的服务器IP>"
     link="$(hy2_build_link "${pw}" "${ip}" "${pin}")"
     hy2_save_link "${link}" || true
-    log_info "HY2 伪装域名已更新: ${domain}（证书已重签，客户端链接已更新）"
+    log_info "HY2 伪装域名与页面已更新: ${domain}（证书已重签，链接已更新）"
     log_info "请用菜单 15 重新导入客户端链接；旧链接因 pin 变化已失效。"
     return 0
 }
@@ -894,7 +894,7 @@ hy2_cmd_sni() {
             fi
             hy2_set_sni "${domain}"
             ;;
-        reset) hy2_set_sni "www.bing.com" ;;
+        reset) hy2_set_sni "www.apple.com" ;;
         *) die "hy2 sni: 未知子命令 '${sub}' (show|set|reset)"; return 1 ;;
     esac
 }

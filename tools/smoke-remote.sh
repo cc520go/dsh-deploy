@@ -143,7 +143,7 @@ if [[ "${FULL}" -eq 1 ]]; then
         sni=""
         [[ -f "${sni_file}" ]] && sni="$(tr -d '[:space:]' < "${sni_file}" 2>/dev/null || true)"
         [[ -n "${sni}" ]] || sni="$(awk -F': *' '/^[[:space:]]*sni:/{print $2; exit}' "${HY2_CONF}" 2>/dev/null || true)"
-        sni="${sni:-www.bing.com}"
+        sni="${sni:-www.apple.com}"
         # Talk to the local listener (it binds *:PORT), not the public IP:
         # avoids NAT hairpin puzzles and tests the same server instance.
         host="${HY2_TEST_SERVER:-127.0.0.1:${HY2_PORT}}"
