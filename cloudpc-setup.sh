@@ -26,8 +26,10 @@ echo "node $(node -v) / npm $(npm -v)"
 
 echo "[3/5] 安装 DSH"
 # 用户家目录里的 .npmrc 可能带 prefix=，会干扰全局安装；统一 cd /root 并显式指定镜像源
-NPM="npm --registry=https://registry.npmmirror.com"
-( cd /root && $SUDO $NPM i -g @deepseek-ai/dsh ) || ( cd /root && $SUDO $NPM i -g @deepseek-ai/dsh --registry=https://registry.npmjs.org )
+# dsh 目前只有预发布版，* 不匹配 rc，必须显式钉版本；清空用户/项目 npmrc 避免 prefix= 干扰
+DSH_VER=0.2.2-rc.1
+( cd /root && $SUDO env NPM_CONFIG_USERCONFIG=/dev/null npm i -g "@deepseek-ai/dsh@$DSH_VER" --registry=https://registry.npmmirror.com ) \
+  || ( cd /root && $SUDO env NPM_CONFIG_USERCONFIG=/dev/null npm i -g "@deepseek-ai/dsh@$DSH_VER" --registry=https://registry.npmjs.org )
 echo "dsh $(dsh --version 2>/dev/null || echo '?')"
 
 echo "[4/5] 安装 Tailscale"
