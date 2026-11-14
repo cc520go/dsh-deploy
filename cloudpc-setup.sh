@@ -25,6 +25,14 @@ fi
 echo "node $(node -v) / npm $(npm -v)"
 
 echo "[3/5] 安装 DSH"
+# 镜像自带 /home/*/.npmrc 里有 prefix=，会让 npm 拒绝一切安装，先备份掉
+for f in /home/*/.npmrc; do
+  [ -f "$f" ] || continue
+  if grep -qE '^[[:space:]]*prefix[[:space:]]*=' "$f"; then
+    $SUDO mv -n "$f" "$f.bak" || true
+    echo "  已备份 $f -> $f.bak"
+  fi
+done
 # 用户家目录里的 .npmrc 可能带 prefix=，会干扰全局安装；统一 cd /root 并显式指定镜像源
 # dsh 目前只有预发布版，* 不匹配 rc，必须显式钉版本；清空用户/项目 npmrc 避免 prefix= 干扰
 DSH_VER=0.2.2-rc.1
