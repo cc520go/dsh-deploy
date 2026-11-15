@@ -101,6 +101,9 @@ mkdir -p "${DIST}"
 # Remove stale Lisa/DSH artifacts so dist only contains this build.
 rm -f "${DIST}"/lisa-*.tar.gz "${DIST}"/lisa-install-*.sh "${DIST}"/dsh-*.tar.gz \
       "${DIST}"/dsh-install-*.sh "${DIST}"/dsh-install.sh "${DIST}"/lisa-install.sh
+# index.html belonged to the retired static mirror; a leftover copy must not
+# be mistaken for part of this release.
+rm -f "${DIST}/index.html"
 TARBALL="${DIST}/${NAME}.tar.gz"
 # Reproducible tarball: sorted member order, fixed owner/group, fixed mtime
 # (the commit timestamp by default), and gzip -n so no host name/timestamp
@@ -206,15 +209,23 @@ info "copied smoke-remote.sh"
     # the new name; lisa-install.sh remains for old links during migration.
     cp -f "$(basename "${SELF}")" dsh-install.sh
     cp -f "$(basename "${SELF}")" lisa-install.sh
+    # Explicit modes: cp -f keeps an existing destination's mode, so a rebuild
+    # over an old dist/ tree could publish a 700 installer by accident.
+    chmod 755 dsh-install.sh lisa-install.sh
+    chmod 644 "$(basename "${TARBALL}")" smoke-remote.sh
     sha256sum "$(basename "${TARBALL}")" "$(basename "${SELF}")" \
         dsh-install.sh lisa-install.sh smoke-remote.sh > SHA256SUMS
+    chmod 644 SHA256SUMS
 )
 info "wrote dist/SHA256SUMS"
 
 # 分离签名：SHA256SUMS.asc 由仓库里的公钥可验。没有签名私钥就拒绝发布，
 # 除非显式 --no-sign（仅用于本地调试）。
 if [[ "${NO_SIGN:-0}" == "1" ]]; then
-    info "跳过签名（--no-sign）"
+    # A --no-sign build must not leave the PREVIOUS signature next to the NEW
+    # manifest: that pair looks verifiable while signing nothing.
+    rm -f "${DIST}/SHA256SUMS.asc"
+    info "跳过签名（--no-sign）；已删除旧的 SHA256SUMS.asc，避免留下过期签名"
 else
     if ! command -v gpg >/dev/null 2>&1; then
         fail "gpg 不可用：发布必须签名。装 gnupg，或用 --no-sign 只做本地调试包。"
