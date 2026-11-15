@@ -2,6 +2,33 @@
 
 记录 DSH 脚本自身的版本；Xray 核心版本见 `VERSION`。
 
+## 1.4.4 — 2026-11-15
+
+基线：1.4.3。本版只修真机验收（清空 → 全新安装 → `smoke-remote.sh --full` →
+全量测试）发现的两个问题。
+
+### 修复
+
+- **发布包缺 `CHANGELOG.md`**：`tools/build-release.sh` 的打包清单只带 README、
+  LICENSE 等，漏了 CHANGELOG 和 CONTRIBUTING，导致**从发布包解包后自测**
+  `t_release_identity` 直接失败（在 1.4.3 的 tarball 上实测复现）。现已打包，
+  并加了一条看守：构建脚本必须包含 `CHANGELOG.md`。
+- **HY2 恢复只验 `is-active`，不验端口**：真机上服务报 `active` 时 UDP 443
+  还没绑定，恢复可能被判成“已验证”。现在恢复后轮询等待端口监听（最多 5 秒），
+  绑不上就返回非 0 并输出 `未监听`，不再谎报。
+
+### 测试
+
+- 新增回归：`hy2_listening`（服务 active 但端口不监听时必须失败）、
+  发布包自测（CHANGELOG 缺失即失败）。
+- 真机验收（Debian 12，清空后全新安装）：
+  - `smoke-remote.sh --full`：19 PASS / 0 FAIL / 1 SKIP（无 hysteria 客户端）
+  - 发布包解包后全量测试：74 passed / 0 failed / 1 skipped
+    （skip 为 `t_auth_timer_fail_closed`：机器有 `systemd-run` 时按设计跳过）
+  - P0 修复实测：篡改快照 `SHA256 不符，拒绝恢复`、服务不受影响；缺 `meta.txt`
+    拒绝；正常快照恢复成功且验证 active + 端口监听
+- 本机：74 passed / 0 failed / 1 skipped；`shellcheck -S warning` 全树干净。
+
 ## 1.4.3 — 2026-11-15
 
 基线：1.4.2（`f997a92`）。本版只修 1.4.2 全量复审发现的问题，不新增功能。

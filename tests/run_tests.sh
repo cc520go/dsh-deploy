@@ -1324,6 +1324,13 @@ t_release_identity() {
     grep -q "${codename}" "${REPO_ROOT}/README.md" || return 1
     # The banner must interpolate the release file, not hard-code a version.
     grep -q 'DSH %s' "${REPO_ROOT}/manage.sh" || return 1
+    # The release tarball must carry CHANGELOG.md: the shipped suite checks
+    # it, so a package without it fails on a real machine (1.4.3 finding).
+    # tools/ only exists in a repo checkout; skip the build-script guard in a
+    # released tarball, where the CHANGELOG check above is the real one.
+    if [[ -f "${REPO_ROOT}/tools/build-release.sh" ]]; then
+        grep -q 'CHANGELOG.md' "${REPO_ROOT}/tools/build-release.sh" || return 1
+    fi
     # A stale hard-coded User-Agent shipped for three releases; catch it now.
     if grep -rn 'DSH/1\.[0-9]' "${REPO_ROOT}/lib" "${REPO_ROOT}/manage.sh" "${REPO_ROOT}/install.sh" 2>/dev/null; then
         return 1
@@ -2068,6 +2075,13 @@ t_hy2_snapshot_restore_verified() {
     printf 'listen: :443\npassword: CHANGED-BY-HAND\n' > "${HY2_CONF}"
     hy2_snapshot_restore "${snap}" >/dev/null 2>&1 || return 1
     grep -q 'PLACEHOLDER-HY2-PASSWORD' "${HY2_CONF}" || return 1
+
+    # 3b) Service active but the UDP port never binds: not verified either.
+    export XRAY_TEST_HY2_SERVICE_STATE=active XRAY_TEST_HY2_LISTENING=0
+    out="$(hy2_snapshot_restore "${snap}" 2>&1)" && rc=0 || rc=$?
+    [[ "${rc}" -ne 0 ]] || return 1
+    printf '%s' "${out}" | grep -q '未监听' || return 1
+    export XRAY_TEST_HY2_LISTENING=1
 
     # 4) Service does not come back: the restore must fail, not claim success.
     printf 'listen: :443\npassword: CHANGED-AGAIN\n' > "${HY2_CONF}"

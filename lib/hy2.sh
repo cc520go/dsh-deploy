@@ -262,6 +262,18 @@ hy2_snapshot_meta_value() {
     awk -F= -v k="${key}" '$1==k{print $2; exit}' "${dir}/meta.txt" 2>/dev/null | tr -d '\r'
 }
 
+# hy2_listening: 0 when HY2's UDP port is actually bound. `systemctl
+# is-active` alone is not enough: a process can report active a moment before
+# it binds, and a restore must not be called verified while nothing listens.
+# Test mode uses XRAY_TEST_HY2_LISTENING (default 1 = listening).
+hy2_listening() {
+    if [[ "${XRAY_TEST_MODE:-0}" == "1" ]]; then
+        [[ "${XRAY_TEST_HY2_LISTENING:-1}" == "1" ]]
+        return
+    fi
+    ss -ulpn 2>/dev/null | grep -qE "[:.]${HY2_PORT}[[:space:]]"
+}
+
 # hy2_snapshot_verify_meta <dir>: verify a HY2 snapshot payload against its
 # meta.txt BEFORE any live file is touched. A snapshot whose binary/config
 # hash does not match meta.txt is not a trustworthy rollback target: it could
@@ -351,7 +363,17 @@ hy2_snapshot_restore() {
         log_error "HY2 恢复后服务未启动（状态 ${state}），回滚未完成: ${dir}"
         return 1
     fi
-    log_info "已从快照恢复并验证服务 active: ${dir}"
+    # Wait briefly for the QUIC listener: `active` can precede the bind.
+    local i
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        hy2_listening && break
+        sleep 0.5
+    done
+    if ! hy2_listening; then
+        log_error "HY2 恢复后服务 active 但 UDP ${HY2_PORT} 未监听，回滚未完成: ${dir}"
+        return 1
+    fi
+    log_info "已从快照恢复并验证服务 active 且 UDP ${HY2_PORT} 在监听: ${dir}"
     hy2_snapshot_mark_good "${dir}" >/dev/null 2>&1 || true
     return 0
 }

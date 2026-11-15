@@ -86,8 +86,11 @@ copy_item() {
     [[ -e "${REPO_ROOT}/${rel}" ]] || fail "missing: ${rel}"
     cp -a "${REPO_ROOT}/${rel}" "${STAGE}/${NAME}/${rel}"
 }
+# CHANGELOG.md belongs in the package: the shipped tests assert the release
+# identity against it, so a tarball without it cannot even self-test.
 for item in install.sh manage.sh diagnose.sh VERSION DSH_VERSION DSH_CODENAME \
-            versions-hy2.conf README.md LICENSE lib docs logrotate tests; do
+            versions-hy2.conf README.md CHANGELOG.md CONTRIBUTING.md LICENSE \
+            lib docs logrotate tests; do
     copy_item "${item}"
 done
 
