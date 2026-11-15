@@ -220,11 +220,65 @@ snapshot_prune() {
     return 0
 }
 
+# snapshot_verify_meta <snapshot-dir> <mode>: verify the snapshot payload
+# against its meta.txt before any live file is touched. A snapshot whose
+# binary/config hash does not match meta.txt is not a trustworthy rollback
+# target: restoring it could silently install a truncated or tampered file.
+# Missing meta.txt, missing hash fields, a hash/file mismatch, or a file
+# that meta.txt does not record all fail closed (return 1).
+snapshot_verify_meta() {
+    local snap="$1" mode="$2" meta b_meta c_meta actual
+    meta="${snap}/meta.txt"
+    if [[ ! -f "${meta}" ]]; then
+        die "snapshot meta.txt missing; refusing to restore ${snap}"
+        return 1
+    fi
+    b_meta="$(awk -F= '$1=="binary_sha256"{print $2; exit}' "${meta}" | tr -d '\r')"
+    c_meta="$(awk -F= '$1=="config_sha256"{print $2; exit}' "${meta}" | tr -d '\r')"
+    if [[ -z "${b_meta}" || -z "${c_meta}" ]]; then
+        die "snapshot meta.txt lacks binary_sha256/config_sha256; refusing to restore ${snap}"
+        return 1
+    fi
+    if [[ -f "${snap}/xray.bin" ]]; then
+        if [[ "${b_meta}" == "none" ]]; then
+            die "snapshot has xray.bin but meta.txt records no binary hash; refusing to restore ${snap}"
+            return 1
+        fi
+        actual="$(sha256sum "${snap}/xray.bin" | cut -d' ' -f1)"
+        if [[ "${actual}" != "${b_meta}" ]]; then
+            die "snapshot binary SHA256 mismatch; refusing to restore ${snap}"
+            return 1
+        fi
+    elif [[ "${b_meta}" != "none" ]]; then
+        die "snapshot meta.txt records a binary but xray.bin is missing; refusing to restore ${snap}"
+        return 1
+    fi
+    if [[ "${mode}" == "full" ]]; then
+        if [[ -f "${snap}/config.json" ]]; then
+            if [[ "${c_meta}" == "none" ]]; then
+                die "snapshot has config.json but meta.txt records no config hash; refusing to restore ${snap}"
+                return 1
+            fi
+            actual="$(sha256sum "${snap}/config.json" | cut -d' ' -f1)"
+            if [[ "${actual}" != "${c_meta}" ]]; then
+                die "snapshot config SHA256 mismatch; refusing to restore ${snap}"
+                return 1
+            fi
+        elif [[ "${c_meta}" != "none" ]]; then
+            die "snapshot meta.txt records a config but config.json is missing; refusing to restore ${snap}"
+            return 1
+        fi
+    fi
+    return 0
+}
+
 # snapshot_restore <snapshot-dir> <mode>: restores from a snapshot.
 # mode "binary" restores only the binary; mode "full" restores binary +
-# config + units + geodata. The caller is responsible for stopping the
-# service first (restore never overwrites a running binary) and for
-# running permission migration + config test + start afterwards.
+# config + units + geodata. The snapshot payload is verified against
+# meta.txt before anything is written; a mismatch aborts the restore.
+# The caller is responsible for stopping the service first (restore never
+# overwrites a running binary) and for running permission migration +
+# config test + start afterwards.
 snapshot_restore() {
     local snap="$1" mode="$2"
     if [[ ! -d "${snap}" ]]; then
@@ -235,6 +289,7 @@ snapshot_restore() {
         die "snapshot_restore: unknown mode '${mode}' (expected binary|full)"
         return 1
     fi
+    snapshot_verify_meta "${snap}" "${mode}" || return 1
     if [[ -f "${snap}/xray.bin" ]]; then
         # --remove-destination: snapshots are hardlinked, so the live path
         # must be unlinked before the copy or it would write through the

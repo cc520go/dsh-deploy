@@ -1879,6 +1879,128 @@ t_uninstall_menu21() {
     return 0
 }
 
+t_snapshot_restore_sha_mismatch() {
+    # A snapshot whose payload no longer matches meta.txt is not a
+    # trustworthy rollback target. snapshot_restore must refuse before
+    # touching the live binary/config, and must also refuse a snapshot
+    # with no meta.txt at all.
+    local d="${SANDBOX}/snap-sha" snap live_bin live_conf bin_before conf_before
+    local old_parent="${SNAPSHOT_PARENT}"
+    mkdir -p "${d}"
+    SNAPSHOT_PARENT="${d}"
+    live_bin="${d}/live-xray.bin"
+    live_conf="${d}/live-config.json"
+    cp -a "${XRAY_BIN}" "${live_bin}" || return 1
+    cp -a "${XRAY_CONF}" "${live_conf}" 2>/dev/null || true
+    render_config "PLACEHOLDER-UUID" "PLACEHOLDER-SID" "PLACEHOLDER-PRIVATE-KEY" \
+        "sni.example" "443" "vision" "www.apple.com:443" "${XRAY_CONF}" || return 1
+    snap="$(snapshot_create)" || return 1
+    bin_before="$(sha256sum "${XRAY_BIN}" | cut -d' ' -f1)"
+    conf_before="$(sha256sum "${XRAY_CONF}" | cut -d' ' -f1)"
+    # Corrupt the snapshot config after meta.txt was written.
+    printf '\n/* tampered */\n' >> "${snap}/config.json" || return 1
+    expect_fail snapshot_restore "${snap}" full || return 1
+    [[ "$(sha256sum "${XRAY_BIN}" | cut -d' ' -f1)" == "${bin_before}" ]] || return 1
+    [[ "$(sha256sum "${XRAY_CONF}" | cut -d' ' -f1)" == "${conf_before}" ]] || return 1
+    # Missing meta.txt is also fail-closed.
+    rm -f "${snap}/meta.txt"
+    expect_fail snapshot_restore "${snap}" full || return 1
+    [[ "$(sha256sum "${XRAY_CONF}" | cut -d' ' -f1)" == "${conf_before}" ]] || return 1
+    # Restore the harness state.
+    cp -a --remove-destination "${live_bin}" "${XRAY_BIN}" || return 1
+    if [[ -f "${live_conf}" ]]; then
+        cp -a --remove-destination "${live_conf}" "${XRAY_CONF}" || return 1
+    fi
+    SNAPSHOT_PARENT="${old_parent}"
+    return 0
+}
+
+t_rollback_honest_failure() {
+    # rollback_node_config / repair_rollback must return non-zero and
+    # say the node may still be faulty when the snapshot cannot be
+    # verified; they must never print "restored and verified" in that case.
+    source "${REPO_ROOT}/manage.sh"
+    source "${REPO_ROOT}/install.sh"
+    local d="${SANDBOX}/rollback-honest" snap out rc
+    local old_parent="${SNAPSHOT_PARENT}"
+    mkdir -p "${d}"
+    SNAPSHOT_PARENT="${d}"
+    render_config "PLACEHOLDER-UUID" "PLACEHOLDER-SID" "PLACEHOLDER-PRIVATE-KEY" \
+        "sni.example" "443" "vision" "www.apple.com:443" "${XRAY_CONF}" || return 1
+    write_node_params "PLACEHOLDER-UUID" "TESTPRIVKEYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" "TESTPUBKEYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" "aabbccdd" "203.0.113.9" "443" "sni.example" "www.apple.com:443" "vision" || return 1
+    snap="$(snapshot_create)" || return 1
+    cp -a "${NODE_PARAMS_FILE}" "${snap}/node.params" || return 1
+    printf '\n/* tampered */\n' >> "${snap}/config.json" || return 1
+    out="$(rollback_node_config "${snap}" 2>&1)" && rc=0 || rc=$?
+    [[ "${rc}" -ne 0 ]] || return 1
+    printf '%s' "${out}" | grep -q "rollback failed" || return 1
+    printf '%s' "${out}" | grep -q "may still be faulty" || return 1
+    printf '%s' "${out}" | grep -q "previous config restored and verified: ${snap}" && return 1
+    out="$(repair_rollback "${snap}" 2>&1)" && rc=0 || rc=$?
+    [[ "${rc}" -ne 0 ]] || return 1
+    printf '%s' "${out}" | grep -q "repair rollback failed" || return 1
+    printf '%s' "${out}" | grep -q "may still be faulty" || return 1
+    printf '%s' "${out}" | grep -q "repair rollback restored and verified: ${snap}" && return 1
+    SNAPSHOT_PARENT="${old_parent}"
+    return 0
+}
+
+t_upgrade_rollback_honest_failure() {
+    # When snapshot_restore itself fails during an upgrade abort,
+    # upgrade_core must report ROLLBACK FAILED / may still be faulty,
+    # not "previous state restored".
+    source "${REPO_ROOT}/lib/service.sh"
+    local d="${SANDBOX}/upgrade-honest" target out rc saved
+    mkdir -p "${d}"
+    download_core() {
+        local destdir="$3" fakezip
+        fakezip="${destdir}/Xray-linux-64.zip"
+        printf 'fake-zip' > "${fakezip}"
+        printf 'fake-dgst' > "${fakezip}.dgst"
+        printf '%s' "${fakezip}"
+    }
+    printf '#!/usr/bin/env bash\nexit 1\n' > "${d}/fail-installer.sh"
+    chmod 755 "${d}/fail-installer.sh"
+    render_config "PLACEHOLDER-UUID" "PLACEHOLDER-SID" "PLACEHOLDER-PRIVATE-KEY" \
+        "sni.example" "443" "vision" "www.apple.com:443" "${XRAY_CONF}" || return 1
+    target="26.10.21"
+    [[ "$(current_version)" == "${target}" ]] && target="26.3.27"
+    saved="$(declare -f snapshot_restore)"
+    snapshot_restore() { return 1; }
+    out="$(upgrade_core "${target}" "${d}/fail-installer.sh" 2>&1)" && rc=0 || rc=$?
+    eval "${saved}"
+    [[ "${rc}" -ne 0 ]] || return 1
+    printf '%s' "${out}" | grep -q "ROLLBACK FAILED" || return 1
+    printf '%s' "${out}" | grep -q "may still be faulty" || return 1
+    printf '%s' "${out}" | grep -q "previous state restored" && return 1
+    return 0
+}
+
+t_mirror_protocol() {
+    source "${REPO_ROOT}/lib/common.sh"
+    validate_mirror_base "https://mirror.example/dsh" || return 1
+    validate_mirror_base "file:///srv/dsh" || return 1
+    validate_mirror_base "" || return 1
+    expect_fail validate_mirror_base "http://mirror.example/dsh" || return 1
+    DSH_ALLOW_INSECURE_MIRROR=1 validate_mirror_base "http://mirror.example/dsh" || return 1
+    unset DSH_ALLOW_INSECURE_MIRROR
+    expect_fail validate_mirror_base "ftp://mirror.example/dsh" || return 1
+    return 0
+}
+
+t_hy2_temp_perms() {
+    # Static guard: the HY2 config test writes a copy containing the
+    # password. It must not be world-readable (regression: 755/644/666).
+    local f="${REPO_ROOT}/lib/hy2.sh"
+    grep -q 'chmod 750 "${work}"' "${f}" || return 1
+    grep -q 'chmod 640 "${tmp}"' "${f}" || return 1
+    grep -q 'chmod 600 "${logf}"' "${f}" || return 1
+    grep -q 'chmod 755 "${work}"' "${f}" && return 1
+    grep -q 'chmod 644 "${tmp}"' "${f}" && return 1
+    grep -q 'chmod 666 "${logf}"' "${f}" && return 1
+    return 0
+}
+
 run_test t_version
 run_test t_dgst
 run_test t_urlencode
@@ -1892,6 +2014,7 @@ run_test t_banner_top_align
 run_test t_diagnose_nocore
 run_test t_diagnose_mocked
 run_test t_upgrade_rollback
+run_test t_upgrade_rollback_honest_failure
 run_test t_perm
 run_test t_node_auto
 run_test t_node_sni
@@ -1935,7 +2058,11 @@ run_test t_bbr_menu_smoke
 run_test t_hy2_sni_validation
 run_test t_hy2_masquerade_url
 run_test t_test_override_production
+run_test t_mirror_protocol
+run_test t_hy2_temp_perms
 run_test t_node_apply_rollback
+run_test t_snapshot_restore_sha_mismatch
+run_test t_rollback_honest_failure
 run_test t_snapshot_latest_order
 run_test t_snapshot_known_good_prune
 run_test t_migrate_legacy_state

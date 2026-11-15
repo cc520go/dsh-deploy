@@ -213,16 +213,35 @@ cmd_backup() {
 }
 
 # ------------------------------------------------------------ node cmds ----
-# rollback_node_config <snapshot>: best-effort restore of a node change.
-# Restores binary+config+units+geodata from the snapshot, re-migrates
-# permissions, and restarts the service. Never fails the caller twice:
-# it always returns 0 (the caller reports the original error).
+# rollback_node_config <snapshot>: restore a node change and verify it.
+# Returns 0 only when the snapshot restored, permission migration passed,
+# the restored config passes config_test, and the service restarted.
+# Returns 1 otherwise; callers must report a failed rollback honestly
+# instead of claiming the previous config was restored.
 rollback_node_config() {
-    local snap="$1"
-    snapshot_restore "${snap}" full || true
-    migrate_permissions || true
-    service_restart || true
-    return 0
+    local snap="$1" ok=1
+    snapshot_restore "${snap}" full || ok=0
+    migrate_permissions || ok=0
+    config_test "${XRAY_CONF}" || ok=0
+    service_restart || ok=0
+    if [[ "${ok}" -eq 1 ]]; then
+        log_info "previous config restored and verified: ${snap}"
+        return 0
+    fi
+    log_error "rollback failed: previous config could not be restored and verified; node may still be faulty (snapshot: ${snap})"
+    return 1
+}
+
+# abort_node_change <reason> <snapshot>: restore and report the real result.
+# Never claims success when the rollback could not be verified.
+abort_node_change() {
+    local reason="$1" snap="$2"
+    if rollback_node_config "${snap}"; then
+        die "node change aborted: ${reason}; previous config restored and verified."
+    else
+        die "node change aborted: ${reason}; ROLLBACK FAILED: previous config could not be restored/verified; node may still be faulty (snapshot: ${snap})."
+    fi
+    return 1
 }
 
 # apply_node_config <tmpconf> <label>: test-then-switch + auto-rollback
@@ -242,32 +261,27 @@ apply_node_config() {
     service_stop || true
     cp -a "${tmpconf}" "${XRAY_CONF}" || {
         log_error "failed to install ${label}; restoring snapshot."
-        rollback_node_config "${snap}"
-        die "node change aborted: install failed; previous config restored."
+        abort_node_change "install failed" "${snap}"
         return 1
     }
     migrate_permissions || {
         log_error "permission migration failed for ${label}; restoring snapshot."
-        rollback_node_config "${snap}"
-        die "node change aborted: permission migration failed; previous config restored."
+        abort_node_change "permission migration failed" "${snap}"
         return 1
     }
     if ! config_test "${XRAY_CONF}"; then
         log_error "live config test failed for ${label}; restoring snapshot."
-        rollback_node_config "${snap}"
-        die "node change aborted: live config test failed; previous config restored."
+        abort_node_change "live config test failed" "${snap}"
         return 1
     fi
     migrate_permissions || {
         log_error "permission migration failed after ${label} test; restoring snapshot."
-        rollback_node_config "${snap}"
-        die "node change aborted: permission migration failed; previous config restored."
+        abort_node_change "permission migration failed after test" "${snap}"
         return 1
     }
     if ! service_restart; then
         log_error "service failed to restart with ${label}; restoring snapshot."
-        rollback_node_config "${snap}"
-        die "node change aborted: service restart failed; previous config restored."
+        abort_node_change "service restart failed" "${snap}"
         return 1
     fi
     log_info "${label} applied (snapshot kept: ${snap})."
@@ -453,7 +467,7 @@ cmd_share() {
 
 # Menu 1 rollback timer (minimal, supplement only — never a substitute
 # for testing key login in a new session):
-#   Unit name: lisa-auth-rollback (systemd-run transient, 10 minutes).
+#   Unit name: dsh-auth-rollback (systemd-run transient, 10 minutes).
 #   State file: ${DSH_STATE_DIR}/auth-rollback.state
 #     (test override: XRAY_TEST_AUTH_STATE, test mode only).
 #     Contents: "pending" + bak_main= + bak_list= lines, or "rolled_back".
@@ -467,7 +481,7 @@ cmd_share() {
 # entry prints "上次未确认，已自动回滚" once, then clears the state.
 auth_state_file() {
     if [[ "${XRAY_TEST_MODE:-0}" == "1" ]]; then
-        test_override XRAY_TEST_AUTH_STATE || printf '/tmp/lisa-auth-rollback-test.state'
+        test_override XRAY_TEST_AUTH_STATE || printf '/tmp/dsh-auth-rollback-test.state'
         return 0
     fi
     printf '%s' "${DSH_STATE_DIR}/auth-rollback.state"
@@ -480,7 +494,7 @@ auth_log_file() {
 auth_timer_start() {
     local bak_main="$1" bak_list="$2" state log
     if [[ "${XRAY_TEST_MODE:-0}" == "1" ]]; then
-        printf '测试模式：回滚定时器已模拟启动（10 分钟，单元 lisa-auth-rollback），不调用 systemd-run，不写真实状态文件。\n'
+        printf '测试模式：回滚定时器已模拟启动（10 分钟，单元 dsh-auth-rollback），不调用 systemd-run，不写真实状态文件。\n'
         return 0
     fi
     state="$(auth_state_file)"; log="$(auth_log_file)"
@@ -490,9 +504,9 @@ auth_timer_start() {
         printf 'bak_main=%s\n' "${bak_main}"
         printf 'bak_list=%s\n' "${bak_list}"
     } > "${state}" 2>/dev/null || { log_warn "auth rollback timer: cannot write state file ${state}."; return 0; }
-    printf '%s auth rollback timer started: 10 minutes, unit lisa-auth-rollback, state %s, log %s\n' "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || printf '')" "${state}" "${log}" >> "${log}" 2>/dev/null || true
+    printf '%s auth rollback timer started: 10 minutes, unit dsh-auth-rollback, state %s, log %s\n' "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || printf '')" "${state}" "${log}" >> "${log}" 2>/dev/null || true
     if command -v systemd-run >/dev/null 2>&1; then
-        systemd-run --on-active=10min --unit=lisa-auth-rollback --timer-property=AccuracySec=1s "${SCRIPT_DIR}/manage.sh" auth-rollback >/dev/null 2>&1 \
+        systemd-run --on-active=10min --unit=dsh-auth-rollback --timer-property=AccuracySec=1s "${SCRIPT_DIR}/manage.sh" auth-rollback >/dev/null 2>&1 \
             || log_warn "auth rollback timer: systemd-run failed; timer is a supplement only, the auth change itself is unchanged."
     else
         log_warn "auth rollback timer: systemd-run not available; no timer started (supplement only)."
@@ -504,6 +518,10 @@ auth_timer_cancel() {
     local state
     state="$(auth_state_file)"
     if [[ "${XRAY_TEST_MODE:-0}" != "1" ]] && command -v systemctl >/dev/null 2>&1; then
+        systemctl stop dsh-auth-rollback.timer 2>/dev/null || true
+        systemctl stop dsh-auth-rollback.service 2>/dev/null || true
+        # Stop a timer left by the pre-rename (lisa) release so it cannot
+        # fire later and restore stale sshd backups.
         systemctl stop lisa-auth-rollback.timer 2>/dev/null || true
         systemctl stop lisa-auth-rollback.service 2>/dev/null || true
     fi

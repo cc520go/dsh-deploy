@@ -4,7 +4,7 @@
 #
 # Contents: logging, fatal-error discipline, confirmation, overridable
 # paths, version helpers, architecture detection, URL encoding, service
-# state helpers (with a hermetic test mode), and the `lisa` launcher.
+# state helpers (with a hermetic test mode), and the `DSH` launcher.
 #
 # Test mode: set XRAY_TEST_MODE=1 and every system-touching helper below
 # switches to canned behaviour (see run_systemctl / service_state /
@@ -44,6 +44,33 @@ log_error() { printf '[ERROR] %s\n' "$*" >&2; }
 
 # die: print an error and return 1. Callers MUST stop afterwards (see above).
 die() { log_error "$*"; return 1; }
+
+# validate_mirror_base <value> [name]: a mirror base is part of the
+# verification chain, so only https:// (or file:// for a local/offline
+# mirror) is accepted by default. Plain http:// is rejected unless the
+# operator explicitly opts in with DSH_ALLOW_INSECURE_MIRROR=1 (trusted
+# LAN only); the warning makes that downgrade visible.
+validate_mirror_base() {
+    local value="$1" name="${2:-DSH_MIRROR_BASE}"
+    [[ -n "${value}" ]] || return 0
+    case "${value}" in
+        https://*|file://*)
+            return 0
+            ;;
+        http://*)
+            if [[ "${DSH_ALLOW_INSECURE_MIRROR:-0}" == "1" ]]; then
+                log_warn "${name} uses insecure http:// (allowed by DSH_ALLOW_INSECURE_MIRROR=1): ${value}"
+                return 0
+            fi
+            die "${name} must use https:// (or file://); refusing insecure http:// mirror: ${value}. Set DSH_ALLOW_INSECURE_MIRROR=1 only for a trusted LAN mirror."
+            return 1
+            ;;
+        *)
+            die "${name} must start with https:// or file:// (got: ${value})"
+            return 1
+            ;;
+    esac
+}
 
 # snapshot_link_previous <sha> <dir> <parent> <name-glob> <file>: when an
 # older snapshot recorded the same binary hash, hardlink its file into <dir>
@@ -135,14 +162,17 @@ TOOL_INSTALL_DIR="${TOOL_INSTALL_DIR:-/usr/local/share/dsh}"
 LEGACY_TOOL_DIR="${LEGACY_TOOL_DIR:-/usr/local/share/xray-reality-manager}"
 LEGACY_TOOL_BACKUP_DIR="${LEGACY_TOOL_BACKUP_DIR:-/root}"
 
-# Default core version: read from the VERSION file next to lib/, else pinned.
+# Default core version: the VERSION file next to lib/ is the ONLY source.
+# If it is missing, fail loudly instead of falling back to a hard-coded
+# version that will silently go stale on the next core update.
 default_version() {
     local vf
     vf="$(dirname "${_LIB_DIR}")/VERSION"
     if [[ -f "${vf}" ]]; then
         tr -d '[:space:]' < "${vf}"
     else
-        printf '26.10.31'
+        die "VERSION file missing: ${vf} (core version has no hard-coded fallback)"
+        return 1
     fi
 }
 

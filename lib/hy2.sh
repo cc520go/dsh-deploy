@@ -253,6 +253,7 @@ hy2_ensure_user() {
 # hy2_download_binary <version> <arch>: download + SHA256 verify, install to HY2_BIN.
 hy2_download_binary() {
     local ver="$1" arch="$2" url tmp want got
+    validate_mirror_base "${DSH_MIRROR_BASE:-}" || return 1
     if [[ -n "${DSH_MIRROR_BASE:-}" ]]; then
         url="${DSH_MIRROR_BASE%/}/hysteria/v${ver#v}/hysteria-linux-${arch}"
     else
@@ -565,12 +566,18 @@ hy2_config_test() {
     work="$(mktemp -d)" || return 1
     tmp="${work}/config.yaml"
     logf="${work}/server.log"
-    chmod 755 "${work}"
+    # The temporary config contains the HY2 password, so the work dir and
+    # config must not be world-readable. hysteria still needs to traverse
+    # the dir and read the config: dir 750 root:hysteria, config 640
+    # root:hysteria, log 600 root (root opens it before runuser drops).
+    chown root:"${HY2_USER}" "${work}" 2>/dev/null || true
+    chmod 750 "${work}"
     if ! sed "s/^listen: .*/listen: 127.0.0.1:39871/" "${HY2_CONF}" > "${tmp}"; then
         rm -rf -- "${work}"; die "配置测试：无法生成临时配置"; return 1
     fi
-    chmod 644 "${tmp}"
-    : > "${logf}"; chmod 666 "${logf}"
+    chown root:"${HY2_USER}" "${tmp}" 2>/dev/null || true
+    chmod 640 "${tmp}"
+    : > "${logf}"; chmod 600 "${logf}"
     timeout 6 runuser -u "${HY2_USER}" -- "${HY2_BIN}" server -c "${tmp}" >"${logf}" 2>&1
     rc=$?
     out="$(cat "${logf}" 2>/dev/null || true)"

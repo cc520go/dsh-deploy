@@ -2,7 +2,29 @@
 
 记录 DSH 脚本自身的版本；Xray 核心版本见 `VERSION`。
 
-## 未发布
+## 1.4.2 — 2026-11-15
+
+### 修复
+
+- **回滚/恢复可验证**：`snapshot_restore` 恢复前对照 `meta.txt` 校验
+  `binary_sha256` / `config_sha256`，缺失、损坏或不符一律拒绝恢复并返回非 0。
+- **回滚诚实上报**：`rollback_node_config`、`repair_rollback`、`upgrade_core`
+  及 `rollback_core` 的恢复路径现在校验权限迁移、配置测试和服务重启；
+  恢复失败时明确输出 `ROLLBACK FAILED` / “node may still be faulty”，
+  不再断言“previous state restored”。新增损坏快照、恢复失败和成功路径回归测试。
+- **撤下 `cloudpc-setup.sh`**：该脚本开 root 密码登录、自动放行 22、
+  使用 `curl | sh`、不校验 Node 包并安装预发布 DSH，与仓库安全原则冲突；
+  需要云电脑脚本时另开分支按密钥登录、手动防火墙、哈希校验和正式版重写。
+- **HY2 配置测试临时文件降权**：临时目录 750 root:hysteria、配置 640
+  root:hysteria、日志 600 root，避免测试窗口内明文密码被本机其他用户读取。
+- **镜像协议强制**：`DSH_MIRROR_BASE` / `DSH_BASE_URL` 只接受 `https://`
+  或 `file://`；`http://` 默认拒绝， trusted LAN 必须显式设置
+  `DSH_ALLOW_INSECURE_MIRROR=1` 并会打印警告。
+- **版本号单一来源**：移除 `default_version` 的硬编码核心版本兜底；
+  `VERSION` 缺失时直接报错，不再静默使用旧值。
+- **认证回滚单元改名**：`lisa-auth-rollback` → `dsh-auth-rollback`，
+  取消时顺带停掉旧单元，避免升级后旧定时器回滚过期 sshd 备份。
+- 文档同步：README 版本、CHANGELOG、TODO；`cloudpc-setup.sh` 不再出现在仓库。
 
 ### 变更
 

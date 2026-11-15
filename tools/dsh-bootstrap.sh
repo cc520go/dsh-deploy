@@ -48,6 +48,29 @@ trap 'rm -rf -- "${WORK}"' EXIT
 log() { printf '[dsh] %s\n' "$*" >&2; }
 die() { log "ERROR: $*"; exit 1; }
 
+# The bootstrap downloads signed assets, so a plaintext http:// base would
+# downgrade the whole chain. Accept https:// (or file:// for a local mirror);
+# http:// requires an explicit DSH_ALLOW_INSECURE_MIRROR=1 opt-in.
+check_base_protocol() {
+    local value="$1" name="$2"
+    [[ -n "${value}" ]] || return 0
+    case "${value}" in
+        https://*|file://*) return 0 ;;
+        http://*)
+            if [[ "${DSH_ALLOW_INSECURE_MIRROR:-0}" == "1" ]]; then
+                log "WARN: ${name} uses insecure http:// (explicitly allowed): ${value}"
+                return 0
+            fi
+            die "${name} must use https:// (or file://); refusing insecure http://: ${value}. Set DSH_ALLOW_INSECURE_MIRROR=1 only for a trusted LAN mirror."
+            ;;
+        *)
+            die "${name} must start with https:// or file:// (got: ${value})"
+            ;;
+    esac
+}
+check_base_protocol "${BASE}" "DSH_BASE_URL"
+check_base_protocol "${DSH_MIRROR_BASE:-}" "DSH_MIRROR_BASE"
+
 [[ "$(id -u)" -eq 0 ]] || die "请用 root 运行（sudo bash）。"
 
 install_pkgs() {

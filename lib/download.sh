@@ -128,6 +128,7 @@ archive_has_xray() {
 # contains an xray binary. Prints the zip path (stdout).
 download_core() {
     local ver arch destdir tag zip_name zip_url dgst_url zip_path dgst_path
+    validate_mirror_base "${DSH_MIRROR_BASE}" || return 1
     ver="$(normalize_version "$1")" || return 1
     arch="$2"
     destdir="$3"
@@ -163,6 +164,7 @@ download_core() {
 # the placeholder commit keeps the default main-branch URL.
 fetch_installer() {
     local dest="$1" size pinned_hash actual
+    validate_mirror_base "${DSH_MIRROR_BASE}" || return 1
     local url="${XRAY_INSTALLER_URL:-${INSTALLER_URL_DEFAULT}}"
     if [[ -n "${DSH_MIRROR_BASE}" ]]; then
         url="${DSH_MIRROR_BASE%/}/xray/install-release.sh"

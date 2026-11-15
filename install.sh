@@ -20,7 +20,7 @@
 #     --check   run environment checks only, do not install
 #     --auto    non-interactive install: auto-detect public IP, defaults
 #               for port/SNI/dest/Vision, no prompts, no confirmation
-#     version   core version to install (default: VERSION file, 26.10.21)
+#     version   core version to install (default: VERSION file)
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")" && pwd)"
 # shellcheck disable=SC1091
@@ -223,6 +223,7 @@ _check_github_network() {
         return 0
     fi
     local url="${ENV_GITHUB_URL}" label="GitHub Releases"
+    validate_mirror_base "${DSH_MIRROR_BASE:-}" || return 1
     if [[ -n "${DSH_MIRROR_BASE:-}" ]]; then
         url="${DSH_MIRROR_BASE%/}/SHA256SUMS"
         label="install mirror"
@@ -672,19 +673,43 @@ print_unverified_host_note() {
 # config never leaves the operator without `DSH`), then either
 # complete a partial install, preserve a valid config, or auto-repair
 # an invalid config (snapshot first, dest only).
-# repair_rollback <snapshot-dir>: best-effort rollback for repair_invalid_config.
+# repair_rollback <snapshot-dir>: restore a repair attempt and verify it.
 # Restores binary+config+units+geodata from the snapshot AND the params file
 # (snapshot_restore does not restore params, so repair backs it up explicitly).
-# Never fails (callers report the original error after rollback).
+# Returns 0 only when the snapshot restored, params copied, permissions
+# migrated, the restored config passes config_test, and the service
+# restarted. Returns 1 otherwise; callers must report a failed rollback
+# honestly instead of claiming the previous state was restored.
 repair_rollback() {
-    local snap="$1"
-    snapshot_restore "${snap}" full || true
+    local snap="$1" ok=1
+    snapshot_restore "${snap}" full || ok=0
     if [[ -f "${snap}/node.params" ]]; then
-        cp -a "${snap}/node.params" "${NODE_PARAMS_FILE}" || true
+        cp -a "${snap}/node.params" "${NODE_PARAMS_FILE}" || ok=0
+    else
+        log_error "repair rollback: snapshot has no node.params; cannot restore params."
+        ok=0
     fi
-    migrate_permissions || true
-    service_restart || true
-    return 0
+    migrate_permissions || ok=0
+    config_test "${XRAY_CONF}" || ok=0
+    service_restart || ok=0
+    if [[ "${ok}" -eq 1 ]]; then
+        log_info "repair rollback restored and verified: ${snap}"
+        return 0
+    fi
+    log_error "repair rollback failed: previous state could not be restored and verified; node may still be faulty (snapshot: ${snap})"
+    return 1
+}
+
+# abort_repair <reason> <snapshot>: restore and report the real result.
+# Never claims success when the rollback could not be verified.
+abort_repair() {
+    local reason="$1" snap="$2"
+    if repair_rollback "${snap}"; then
+        die "repair aborted: ${reason}; previous state restored and verified."
+    else
+        die "repair aborted: ${reason}; ROLLBACK FAILED: previous state could not be restored/verified; node may still be faulty (snapshot: ${snap})."
+    fi
+    return 1
 }
 
 # repair_invalid_config: repairs an existing INVALID node config in place.
@@ -748,48 +773,41 @@ repair_invalid_config() {
     service_stop || log_warn "repair: stop reported an error; continuing (service may already be stopped)."
     cp -a "${tmpconf}" "${XRAY_CONF}" || {
         log_error "repair: failed to install repaired config; restoring snapshot."
-        repair_rollback "${snap}"
-        die "repair aborted: could not install repaired config; previous state restored."
+        abort_repair "could not install repaired config" "${snap}"
         return 1
     }
     migrate_permissions || {
         log_error "repair: permission migration failed; restoring snapshot."
-        repair_rollback "${snap}"
-        die "repair aborted: permission migration failed; previous state restored."
+        abort_repair "permission migration failed" "${snap}"
         return 1
     }
     if ! config_test "${XRAY_CONF}"; then
         log_error "repair: live config test failed after install; restoring snapshot."
-        repair_rollback "${snap}"
-        die "repair aborted: live config test failed; previous state restored."
+        abort_repair "live config test failed" "${snap}"
         return 1
     fi
     # Root-run live test may have created root-owned log files;
     # re-migrate before restart, or the xray-user service fails (23).
     migrate_permissions || {
         log_error "repair: permission migration failed after live test; restoring snapshot."
-        repair_rollback "${snap}"
-        die "repair aborted: permission migration failed; previous state restored."
+        abort_repair "permission migration failed after live test" "${snap}"
         return 1
     }
     write_node_params "${uuid}" "${priv}" "${pub}" "${sid}" "${host}" "${port}" "${sni}" "${dest}" "${flow}" || {
         log_error "repair: failed to write normalized params; restoring snapshot."
-        repair_rollback "${snap}"
-        die "repair aborted: could not write params; previous state restored."
+        abort_repair "could not write params" "${snap}"
         return 1
     }
     service_enable || true
     service_restart || {
         log_error "repair: service failed to restart; restoring snapshot."
-        repair_rollback "${snap}"
-        die "repair aborted: service restart failed; previous state restored."
+        abort_repair "service restart failed" "${snap}"
         return 1
     }
     if ! wait_for_listening "${port}"; then
         log_error "repair: service restarted but port ${port} is not listening; restoring snapshot."
         service_stop || true
-        repair_rollback "${snap}"
-        die "repair aborted: repaired config did not produce a listening service; previous state restored."
+        abort_repair "repaired config did not produce a listening service" "${snap}"
         return 1
     fi
     # Post-change verified marking (main-chat decision 2026-11-03):

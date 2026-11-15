@@ -31,6 +31,37 @@ service_enable()  { run_systemctl enable xray; }
 # service_reload_units: daemon-reload after unit files change.
 service_reload_units() { run_systemctl daemon-reload; }
 
+# restore_upgrade_snapshot <snapshot>: restore and verify an upgrade rollback.
+# Returns 0 only when the snapshot restored, permissions migrated, the
+# restored config passes config_test, and the service restarted. Returns 1
+# otherwise; callers must report a failed rollback honestly instead of
+# claiming the previous state was restored.
+restore_upgrade_snapshot() {
+    local snap="$1" ok=1
+    snapshot_restore "${snap}" full || ok=0
+    migrate_permissions || ok=0
+    config_test "${XRAY_CONF}" || ok=0
+    service_restart || ok=0
+    if [[ "${ok}" -eq 1 ]]; then
+        log_info "upgrade rollback restored and verified: ${snap}"
+        return 0
+    fi
+    log_error "upgrade rollback failed: previous state could not be restored and verified; node may still be faulty (snapshot: ${snap})"
+    return 1
+}
+
+# abort_upgrade <reason> <snapshot>: restore and report the real result.
+# Never claims success when the rollback could not be verified.
+abort_upgrade() {
+    local reason="$1" snap="$2"
+    if restore_upgrade_snapshot "${snap}"; then
+        die "upgrade aborted: ${reason}; previous state restored and verified."
+    else
+        die "upgrade aborted: ${reason}; ROLLBACK FAILED: previous state could not be restored/verified; node may still be faulty (snapshot: ${snap})."
+    fi
+    return 1
+}
+
 # -------------------------------------------------------- version query ----
 # official_latest_version: prints the latest official tag (no leading v)
 # from the GitHub API, parsed with grep/sed (no jq). Empty on failure.
@@ -84,56 +115,38 @@ upgrade_core() {
     # zip. It never overwrites an existing config (official behaviour).
     install_with_official "${installer}" "${zip}" || {
         log_error "official installer failed; restoring snapshot."
-        snapshot_restore "${snap}" full || true
-        migrate_permissions || true
-        service_restart || true
-        die "upgrade aborted: installer failed; previous state restored."
+        abort_upgrade "installer failed" "${snap}"
         return 1
     }
     # Units changed: reload before any (re)start so systemd sees the new units.
     service_reload_units || true
     migrate_permissions || {
         log_error "permission migration failed; restoring snapshot."
-        snapshot_restore "${snap}" full || true
-        migrate_permissions || true
-        service_restart || true
-        die "upgrade aborted: permission migration failed; previous state restored."
+        abort_upgrade "permission migration failed" "${snap}"
         return 1
     }
     if ! config_test "${XRAY_CONF}"; then
         log_error "config test failed after upgrade; restoring snapshot."
-        snapshot_restore "${snap}" full || true
-        migrate_permissions || true
-        service_restart || true
-        die "upgrade aborted: config test failed; previous state restored."
+        abort_upgrade "config test failed" "${snap}"
         return 1
     fi
     # Root-run test may have created root-owned log files; re-migrate
     # before restart, or the xray-user service fails (exit 23).
     migrate_permissions || {
         log_error "permission migration failed after upgrade test; restoring snapshot."
-        snapshot_restore "${snap}" full || true
-        migrate_permissions || true
-        service_restart || true
-        die "upgrade aborted: permission migration failed; previous state restored."
+        abort_upgrade "permission migration failed after upgrade test" "${snap}"
         return 1
     }
     service_restart || {
         log_error "service failed to start after upgrade; restoring snapshot."
-        snapshot_restore "${snap}" full || true
-        migrate_permissions || true
-        service_restart || true
-        die "upgrade aborted: service restart failed; previous state restored."
+        abort_upgrade "service restart failed" "${snap}"
         return 1
     }
     local newver
     newver="$(current_version)"
     if [[ "${newver}" != "${target}" ]]; then
         log_error "post-upgrade version is ${newver}, expected ${target}; restoring snapshot."
-        snapshot_restore "${snap}" full || true
-        migrate_permissions || true
-        service_restart || true
-        die "upgrade aborted: version verification failed; previous state restored."
+        abort_upgrade "version verification failed" "${snap}"
         return 1
     fi
     log_info "upgrade complete: ${cur} -> ${target} (snapshot kept: ${snap})."
@@ -160,25 +173,48 @@ rollback_core() {
     local pre
     pre="$(snapshot_create)" || return 1
     service_stop || log_warn "stop reported an error; continuing (service may already be stopped)."
-    snapshot_restore "${snap}" full || {
+    if ! snapshot_restore "${snap}" full; then
         log_error "snapshot restore failed; attempting to restore the pre-rollback snapshot."
-        snapshot_restore "${pre}" full || true
-        migrate_permissions || true
-        service_restart || true
-        die "rollback aborted: restore failed; pre-rollback state restored."
-        return 1
-    }
-    migrate_permissions || { die "permission migration failed after rollback."; return 1; }
-    if ! config_test "${XRAY_CONF}"; then
-        log_error "config test failed after rollback; restoring pre-rollback snapshot."
-        snapshot_restore "${pre}" full || true
-        migrate_permissions || true
-        service_restart || true
-        die "rollback aborted: config test failed; pre-rollback state restored."
+        if restore_upgrade_snapshot "${pre}"; then
+            die "rollback aborted: restore failed; pre-rollback state restored and verified."
+        else
+            die "rollback aborted: restore failed; ROLLBACK FAILED: pre-rollback state could not be restored/verified; node may still be faulty (snapshot: ${pre})."
+        fi
         return 1
     fi
-    migrate_permissions || { die "permission migration failed after rollback test."; return 1; }
-    service_restart || { die "service failed to restart after rollback."; return 1; }
+    migrate_permissions || {
+        if restore_upgrade_snapshot "${pre}"; then
+            die "rollback aborted: permission migration failed; pre-rollback state restored and verified."
+        else
+            die "rollback aborted: permission migration failed; ROLLBACK FAILED: pre-rollback state could not be restored/verified; node may still be faulty (snapshot: ${pre})."
+        fi
+        return 1
+    }
+    if ! config_test "${XRAY_CONF}"; then
+        log_error "config test failed after rollback; restoring pre-rollback snapshot."
+        if restore_upgrade_snapshot "${pre}"; then
+            die "rollback aborted: config test failed; pre-rollback state restored and verified."
+        else
+            die "rollback aborted: config test failed; ROLLBACK FAILED: pre-rollback state could not be restored/verified; node may still be faulty (snapshot: ${pre})."
+        fi
+        return 1
+    fi
+    migrate_permissions || {
+        if restore_upgrade_snapshot "${pre}"; then
+            die "rollback aborted: permission migration failed after rollback test; pre-rollback state restored and verified."
+        else
+            die "rollback aborted: permission migration failed after rollback test; ROLLBACK FAILED: pre-rollback state could not be restored/verified; node may still be faulty (snapshot: ${pre})."
+        fi
+        return 1
+    }
+    if ! service_restart; then
+        if restore_upgrade_snapshot "${pre}"; then
+            die "rollback aborted: service failed to restart; pre-rollback state restored and verified."
+        else
+            die "rollback aborted: service failed to restart; ROLLBACK FAILED: pre-rollback state could not be restored/verified; node may still be faulty (snapshot: ${pre})."
+        fi
+        return 1
+    fi
     log_info "rollback complete: now on $(current_version) (pre-rollback snapshot kept: ${pre})."
     return 0
 }

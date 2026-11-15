@@ -3,11 +3,29 @@
 > 这是项目内部交接笔记，不是用户文档；命令可能随版本变化，使用前先对照 README。
 > 公开仓库保留仅为历史记录，不要据此直接操作生产机。
 
-最后更新：2026-11-07
+最后更新：2026-11-15
 
-## 等一台新云服务器
+## 1.4.2 审计修复（2026-11-15）
 
-到货后按这个顺序做：
+- 撤下 `cloudpc-setup.sh`（root 密码登录 / 自动放行 22 / curl|sh / 未校验 Node / 预发布 DSH），需要时另开分支重写。
+- `snapshot_restore` 恢复前校验 `meta.txt` 的 binary/config SHA256，损坏快照拒绝恢复。
+- `rollback_node_config` / `repair_rollback` / `upgrade_core` / `rollback_core` 改为验证恢复结果并诚实上报，失败输出 `ROLLBACK FAILED`。
+- HY2 配置测试临时文件改为 750/640/600（root:hysteria），不再全局可读。
+- `DSH_MIRROR_BASE` / `DSH_BASE_URL` 强制 https 或 file；http 需显式 `DSH_ALLOW_INSECURE_MIRROR=1`。
+- 移除核心版本硬编码兜底；`lisa-auth-rollback` 改名 `dsh-auth-rollback`。
+- 新增 `t_snapshot_restore_sha_mismatch`、`t_rollback_honest_failure`、`t_upgrade_rollback_honest_failure`。
+
+## 命名与签名
+
+- 启动器保持大写 `DSH`；**不提供**小写 `dsh` 别名，避免与 `@deepseek-ai/dsh`、DSH Go 混淆。R-05 关闭。
+- 现役发布密钥：`8E25C6FC8FA01719137FAAE6BC9AF5236E467872`（`DSH Release <release@dsh-deploy>`）。
+- 旧密钥：`63AEB2BD09A2458B54D7AB1E7F938C08CA8E68D6`，仅保留公钥，标记 retired；不再用于新签名。
+- 私钥只存在维护者本机 keyring，发布前必须确认离线备份与试签；备份由维护者执行，不写入仓库。
+
+## 新云服务器（已到货 2026-11-15）
+
+已到货 `104.219.211.52`（Debian 12，SSH 端口 31228）；待接 CI 补充环境并跑
+`smoke-remote.sh --full`，通过后再勾下面各项。
 
 1. 系统装 **Debian 12**，给我 root SSH（我把公钥给你，或你给我密码）。
 2. 我这边执行：
