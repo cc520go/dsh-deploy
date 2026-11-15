@@ -148,7 +148,7 @@ loopback_reality_test() {
         if curl -fsSL --socks5-hostname "127.0.0.1:${port}" --max-time 10 "https://example.com" -o /dev/null 2>/dev/null; then
             kill "${pid}" 2>/dev/null || true; wait "${pid}" 2>/dev/null || true
             rm -rf -- "${tmpdir}"
-            printf 'loopback Reality test passed (local client -> 127.0.0.1:${node_port} -> internet)\n'; return 0
+            printf 'loopback Reality test passed (local client -> 127.0.0.1:%s -> internet)\n' "${node_port}"; return 0
         fi
     fi
     kill "${pid}" 2>/dev/null || true; wait "${pid}" 2>/dev/null || true
@@ -160,7 +160,7 @@ loopback_reality_test() {
     if ! curl -4 -fsSL --connect-timeout 8 --max-time 15 "https://example.com" -o /dev/null 2>/dev/null; then
         printf 'loopback Reality test skipped (no outbound network from this server; cannot judge the node)\n'; return 2
     fi
-    printf 'loopback Reality test FAILED (local client could not complete a request through 127.0.0.1:${node_port}; server config itself is unchanged)\n'; return 1
+    printf 'loopback Reality test FAILED (local client could not complete a request through 127.0.0.1:%s; server config itself is unchanged)\n' "${node_port}"; return 1
 }
 
 # diagnose_restore_offer: called only when main() saw a FAIL.

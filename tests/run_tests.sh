@@ -2466,6 +2466,8 @@ t_diagnose_uses_node_port() {
     grep -q '"port": 443' "${cfg}" && return 1
     # The source must not hard-code the node port anywhere.
     grep -q '"port": 443, "users"' "${REPO_ROOT}/diagnose.sh" && return 1
+    # The message must interpolate the port, not print "${node_port}".
+    grep -qF '127.0.0.1:${node_port}' "${REPO_ROOT}/diagnose.sh" && return 1
     return 0
 }
 
