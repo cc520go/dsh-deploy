@@ -1,0 +1,38 @@
+name: Release 1.4.2
+
+on:
+  push:
+    branches: [release-1.4.2]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify signed assets
+        run: |
+          cd dist
+          sha256sum -c SHA256SUMS
+          gpg --import dsh-signing-key.asc
+          gpg --verify SHA256SUMS.asc SHA256SUMS
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.4.2
+          name: DSH 1.4.2「鲸潮」
+          body_path: .github/release-body-1.4.2.md
+          draft: false
+          prerelease: false
+          make_latest: true
+          files: |
+            dist/dsh-1.4.2.tar.gz
+            dist/dsh-install-1.4.2.sh
+            dist/dsh-install.sh
+            dist/lisa-install.sh
+            dist/SHA256SUMS
+            dist/SHA256SUMS.asc
+            dist/dsh-signing-key.asc
+            dist/smoke-remote.sh
