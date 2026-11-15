@@ -18,6 +18,21 @@
 - **P2 `node.params` 先按默认 umask 写再 chmod**：改为 umask 077 直接创建为
   0600，`chmod` 失败也硬失败（和 `render_config` 的处理一致）。
 
+### 口径更正
+
+- **配置权限**：写盘瞬间是 `0600`（umask 077 + 校验 + 原子 mv），安装完成后
+  `migrate_permissions` 会改成官方布局 **`640 root:xray`**（xray 用户要读），
+  之前“最终 600 root:root”的说法不准确，以 640 为准。
+
+### 发布流程修正（可复现）
+
+- **tag 打在“被构建的提交”上**：1.4.7 的 tag 打在加了 `dist/` 的发布提交上，
+  而构建发生在它前面的修复提交，`SOURCE_DATE_EPOCH` 相差 405 秒——外部按 tag
+  构建得到 `d921c3…`，与发布的 `85a8f8…` 不一致。从 1.4.8 起：先在源码提交上
+  构建，tag 也打在该提交，`dist/` 只进发布分支。
+- 发布工作流新增一步：按 tag 重新构建一次，与 `dist/` 里的 tarball 逐字节比对，
+  不一致直接让 Release 失败。
+
 ### 测试
 
 - 本机：86 passed / 0 failed / 1 skipped。

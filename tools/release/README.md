@@ -10,6 +10,9 @@
 ## 步骤（在仓库根目录）
 
 ```bash
+# 关键：tag 要打在“被构建的源码提交”上。构建用的是 HEAD 的提交时间
+# （SOURCE_DATE_EPOCH），tag 若打在后面加了 dist/ 的发布提交上，外部按 tag
+# 构建会得到不同的哈希（1.4.7 踩过）。
 ver=1.4.8
 git checkout -b "release/v${ver}"
 mkdir -p release-assets
@@ -45,3 +48,15 @@ git branch -D "release/v${ver}"
 
 注意：`tag` 必须先推送；附件必须是已经签好名的 `dist/` 产物，不要在 CI 里重新构建
 （CI 没有签名私钥，`build-release.sh --with-tests` 在手机上也会因缺少 systemd 失败）。
+
+## 复现校验
+
+在任意机器上：
+
+```bash
+git checkout "v${ver}"            # 必须是构建时的源码提交
+bash tools/build-release.sh --no-sign
+sha256sum dist/dsh-${ver}.tar.gz  # 应与 Release 的 SHA256SUMS 一致
+```
+
+发布工作流也会做这一步：按 tag 重建 tarball 并与 `dist/` 比对，不一致即失败。
