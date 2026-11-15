@@ -115,7 +115,7 @@ P1 全部、P2 中成本低收益高的 9 项，其余如实留在下面。
 - **官方国内镜像已取消**：686 不再提供 nginx / `/srv/dsh/dist`，相关工具与文档已删除。
   国内连不上 GitHub 时，用 Release 附件走“离线单文件”方式。
 - 安装器的 `DSH_MIRROR_BASE` 代码能力保留，仅供自建镜像使用，不承诺、不维护。
-- `git tag` 保留，用于回溯源码；`dist/` 保留，clone 即可用。
+- `git tag` 保留，用于回溯源码。`dist/` **不进 main**：发布物由 `tools/build-release.sh` 生成，只随 Release 附件发布（历史遗留的 1.4.2 资产已从 main 摘除）。
 
 ## 待办
 
