@@ -183,10 +183,17 @@ hy2_snapshot_create() {
         cp -a "${HY2_CONF}" "${dir}/config.yaml" \
             || { log_error "HY2 快照：复制配置失败，拒绝生成不可恢复的快照"; return 1; }
     fi
-    [[ -f "${HY2_CERT}" ]]  && cp -a "${HY2_CERT}"  "${dir}/cert.pem"     2>/dev/null || true
-    [[ -f "${HY2_CERT}" ]]  && cp -a "${HY2_CERT}"  "${dir}/cert.pem"     2>/dev/null || true
-    [[ -f "${HY2_KEY}" ]]   && cp -a "${HY2_KEY}"   "${dir}/key.pem"      2>/dev/null || true
-    [[ -f "${HY2_UNIT}" ]]  && cp -a "${HY2_UNIT}"  "${dir}/${HY2_SERVICE}.service" 2>/dev/null || true
+    # cert/key/unit are now digest-verified on restore, so a failed capture
+    # must fail the snapshot instead of silently recording "none".
+    if [[ -f "${HY2_CERT}" ]]; then
+        cp -a "${HY2_CERT}" "${dir}/cert.pem" || { log_error "HY2 快照：复制证书失败"; return 1; }
+    fi
+    if [[ -f "${HY2_KEY}" ]]; then
+        cp -a "${HY2_KEY}" "${dir}/key.pem" || { log_error "HY2 快照：复制私钥失败"; return 1; }
+    fi
+    if [[ -f "${HY2_UNIT}" ]]; then
+        cp -a "${HY2_UNIT}" "${dir}/${HY2_SERVICE}.service" || { log_error "HY2 快照：复制 unit 失败"; return 1; }
+    fi
     [[ -f "${HY2_MARKER}" ]] && cp -a "${HY2_MARKER}" "${dir}/marker"     2>/dev/null || true
     sha_bin="none"; sha_conf="none"; sha_cert="none"; sha_key="none"; sha_unit="none"
     [[ -f "${dir}/hysteria.bin" ]] && sha_bin="$(sha256sum "${dir}/hysteria.bin" | cut -d' ' -f1)"

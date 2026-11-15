@@ -874,6 +874,14 @@ handle_already_installed() {
             printf '\n安装已完成！输入 DSH 打开菜单查看配置。\n'
         else
             log_info "preserving existing config."
+            # A config without node.params cannot produce a share link and
+            # verify_listening("") would treat it as "nothing to check" —
+            # that used to print "install state OK" for an unusable node.
+            if [[ -z "$(read_node_param port)" ]]; then
+                log_error "existing config found but node.params is missing/incomplete; cannot verify the node or print its link."
+                log_error "Recover it from a snapshot ('DSH' menu 5) or remove the config and re-run the installer for a fresh node."
+                return 1
+            fi
             if config_test "${XRAY_CONF}"; then
                 # Listener-aware: a valid config with a stale service (active
                 # but not listening, or inactive) must be restarted to load

@@ -59,6 +59,11 @@ write_node_params() {
     dir="$(dirname "${NODE_PARAMS_FILE}")"
     mkdir -p "${dir}" || { die "cannot create params dir: ${dir}"; return 1; }
     chmod 700 "${dir}" || true
+    # The params file holds the private key: create it 0600 from the start
+    # (umask 077) instead of writing 0644 and chmod-ing afterwards.
+    local old_umask
+    old_umask="$(umask)"
+    umask 077
     {
         printf 'uuid=%s\n' "$1"
         printf 'private_key=%s\n' "$2"
@@ -69,8 +74,9 @@ write_node_params() {
         printf 'sni=%s\n' "$7"
         printf 'dest=%s\n' "$8"
         printf 'flow=%s\n' "$9"
-    } > "${NODE_PARAMS_FILE}" || { die "cannot write params file"; return 1; }
-    chmod 600 "${NODE_PARAMS_FILE}" || true
+    } > "${NODE_PARAMS_FILE}" || { umask "${old_umask}"; die "cannot write params file"; return 1; }
+    umask "${old_umask}"
+    chmod 600 "${NODE_PARAMS_FILE}" || { die "cannot set 0600 on params file"; return 1; }
     return 0
 }
 

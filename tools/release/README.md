@@ -10,7 +10,7 @@
 ## 步骤（在仓库根目录）
 
 ```bash
-ver=1.4.7
+ver=1.4.8
 git checkout -b "release/v${ver}"
 mkdir -p release-assets
 cp dist/dsh-install-${ver}.sh dist/dsh-${ver}.tar.gz \
@@ -30,7 +30,7 @@ GIT_SSH_COMMAND="ssh -i ${GIT_DEPLOY_KEY:?请设置 deploy key 路径} -o Identi
 ```bash
 curl -fsSL 'https://api.github.com/repos/cc520go/dsh-deploy/actions/runs?per_page=5' \
   | python3 -c 'import json,sys; [print(r["name"], r["status"], r["conclusion"]) for r in json.load(sys.stdin)["workflow_runs"]]'
-curl -fsSL 'https://api.github.com/repos/cc520go/dsh-deploy/releases/tags/v1.4.7' \
+curl -fsSL 'https://api.github.com/repos/cc520go/dsh-deploy/releases/tags/v1.4.8' \
   | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["name"], d["draft"], [a["name"] for a in d["assets"]])'
 ```
 

@@ -2508,6 +2508,42 @@ t_uninstall_args() {
 }
 
 
+t_params_file_mode() {
+    # node.params holds the Reality private key: 0600 from creation, even
+    # under a 022 umask.
+    source "${REPO_ROOT}/lib/node.sh"
+    local old_umask
+    old_umask="$(umask)"
+    umask 022
+    write_node_params "PLACEHOLDER-UUID" "TESTPRIVKEYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" \
+        "TESTPUBKEYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" "aabbccdd" \
+        "203.0.113.9" "443" "sni.example" "www.apple.com:443" "vision" || return 1
+    umask "${old_umask}"
+    [[ "$(stat -c '%a' "${NODE_PARAMS_FILE}")" == "600" ]] || return 1
+    return 0
+}
+
+t_install_preserve_requires_params() {
+    # A leftover valid config with no node.params used to end with
+    # "install state OK" even though no share link could be produced:
+    # verify_listening("") treats an empty port as "nothing to check".
+    export LOGROTATE_DIR="${SANDBOX}/logrotate.d"
+    mkdir -p "${LOGROTATE_DIR}"
+    # shellcheck disable=SC1091
+    source "${REPO_ROOT}/install.sh"
+    export XRAY_TEST_LISTEN_PORTS="443"
+    render_config "PLACEHOLDER-UUID" "PLACEHOLDER-SID" "PLACEHOLDER-PRIVATE-KEY" \
+        "sni.example" "443" "vision" "www.apple.com:443" "${XRAY_CONF}" || return 1
+    rm -f "${NODE_PARAMS_FILE}"
+    local out rc
+    out="$(handle_already_installed 2>&1)" && rc=0 || rc=$?
+    [[ "${rc}" -ne 0 ]] || return 1
+    printf '%s' "${out}" | grep -q 'node.params is missing' || return 1
+    printf '%s' "${out}" | grep -q 'install state OK' && return 1
+    return 0
+}
+
+
 run_test t_version
 run_test t_dgst
 run_test t_urlencode
@@ -2577,6 +2613,8 @@ run_test t_perm_binary_audit
 run_test t_diagnose_uses_node_port
 run_test t_upgrade_requires_listening
 run_test t_uninstall_args
+run_test t_params_file_mode
+run_test t_install_preserve_requires_params
 run_test t_hy2_snapshot_restore_verified
 run_test t_hy2_rollback_honest_failure
 run_test t_snapshot_params_roundtrip

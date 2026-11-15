@@ -2,6 +2,28 @@
 
 记录 DSH 脚本自身的版本；Xray 核心版本见 `VERSION`。
 
+## 1.4.8 — 2026-11-16
+
+基线：1.4.7。按“发版前自查清单”逐项自查时发现并修复。
+
+### 修复
+
+- **P1 保留旧配置但缺 `node.params` 时误报安装成功**：`handle_already_installed`
+  的保留分支用 `verify_listening "$(read_node_param port)"` 判断，端口为空时
+  `verify_listening` 按“没有可校验的端口”返回 0，于是打印 `install state OK`
+  ——节点既没有参数也拿不到链接。现在该分支先要求 `port` 存在，缺失直接失败，
+  并提示从快照恢复或删配置重装。
+- **P2 HY2 快照复制证书/私钥/unit 失败被吞**：这三项现在参与恢复校验，
+  复制失败必须让快照创建失败，不能记成 `none`；同时删掉重复的一行证书复制。
+- **P2 `node.params` 先按默认 umask 写再 chmod**：改为 umask 077 直接创建为
+  0600，`chmod` 失败也硬失败（和 `render_config` 的处理一致）。
+
+### 测试
+
+- 本机：86 passed / 0 failed / 1 skipped。
+- 新增：`t_params_file_mode`（022 umask 下仍是 600）、
+  `t_install_preserve_requires_params`（缺参数必须失败且不得打印 OK）。
+
 ## 1.4.7 — 2026-11-16
 
 基线：1.4.6。按 1.4.6 闭环审查的 13 条修复 + 卸载非交互开关。
