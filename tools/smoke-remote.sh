@@ -29,6 +29,10 @@ HY2_BIN="${HY2_BIN:-/usr/local/bin/hysteria}"
 HY2_USER="${HY2_USER:-hysteria}"
 HY2_MARKER="${HY2_MARKER:-${HY2_CONF_DIR}/.managed-by-hy2addon}"
 HY2_PORT="${HY2_PORT:-443}"
+# Unit path is overridable with the other HY2_* paths: tests that simulate a
+# Reality-only machine must be able to hide the unit file too, otherwise a
+# host that really runs HY2 makes the simulation look "installed".
+HY2_UNIT_FILE="${HY2_UNIT_FILE:-/etc/systemd/system/${HY2_SERVICE}.service}"
 LAUNCHER="${LAUNCHER:-/usr/local/bin/DSH}"
 TOOL_DIR="${TOOL_DIR:-/usr/local/share/dsh}"
 WORK="$(mktemp -d)"
@@ -66,7 +70,7 @@ fi
 # when it is not (the main-line Reality checks above still ran).
 hy2_present() {
     [[ -f "${HY2_MARKER}" ]] || [[ -x "${HY2_BIN}" ]] || [[ -f "${HY2_CONF}" ]] \
-        || [[ -f "/etc/systemd/system/${HY2_SERVICE}.service" ]]
+        || [[ -f "${HY2_UNIT_FILE}" ]]
 }
 
 smoke_hy2_checks() {

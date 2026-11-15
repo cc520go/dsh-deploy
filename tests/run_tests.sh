@@ -2287,6 +2287,7 @@ STUB
     out="$(PATH="${d}/bin:${PATH}" LAUNCHER="${d}/launcher" TOOL_DIR="${d}/tool" \
         HY2_BIN="${d}/none/hysteria" HY2_CONF="${d}/none/c.yaml" \
         HY2_CONF_DIR="${d}/none" HY2_MARKER="${d}/none/marker" \
+        HY2_UNIT_FILE="${d}/none/unit" \
         bash "${smoke}" 2>&1)"
     printf '%s' "${out}" | grep -q 'HY2 未安装' || return 1
     printf '%s' "${out}" | grep -qE '^FAIL  .*hy2' && return 1
@@ -2297,6 +2298,7 @@ STUB
     out="$(PATH="${d}/bin:${PATH}" LAUNCHER="${d}/launcher" TOOL_DIR="${d}/tool" \
         HY2_BIN="${d}/none/hysteria" HY2_CONF="${d}/none/c.yaml" \
         HY2_CONF_DIR="${d}/none" HY2_MARKER="${d}/marker" \
+        HY2_UNIT_FILE="${d}/none/unit" \
         bash "${smoke}" 2>&1)"
     printf '%s' "${out}" | grep -qE '^FAIL  hy2 服务' || return 1
     return 0

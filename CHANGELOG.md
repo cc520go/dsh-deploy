@@ -2,6 +2,25 @@
 
 记录 DSH 脚本自身的版本；Xray 核心版本见 `VERSION`。
 
+## 1.4.6 — 2026-11-15
+
+基线：1.4.5。修 1.4.5 真机复核发现的一个测试/检测问题。
+
+### 修复
+
+- **smoke 的 HY2 检测新增 `HY2_UNIT_FILE` 覆盖**：`hy2_present` 之前把
+  `/etc/systemd/system/hysteria-server.service` 写死，导致包内测试
+  `t_smoke_reality_only` 在“真的装过 HY2”的机器上无法模拟 Reality-only
+  （unit 文件还在），真机跑发布包自测会红。现在 unit 路径和其它 HY2 路径
+  一样可覆盖，测试把 unit 也指到空目录，模拟才成立。
+- 生产行为不变：unit 存在仍视为 HY2 已安装，装了但坏了继续 FAIL。
+
+### 测试
+
+- 本机：78 passed / 0 failed / 1 skipped。
+- 真机（Debian 12，已装 HY2）：发布包解包后自测 78 passed / 0 failed /
+  1 skipped（skip 为 `t_auth_timer_fail_closed`，机器有 `systemd-run` 时按设计跳过）。
+
 ## 1.4.5 — 2026-11-15
 
 基线：1.4.4。按 1.4.4 闭环审查的 5 条修复，不新增功能。
