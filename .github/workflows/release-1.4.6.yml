@@ -1,0 +1,52 @@
+name: Release 1.4.6
+
+# 发布流程：本地 `tools/build-release.sh --with-tests` 构建并签名 -> 把 dist/
+# 提交到 release-1.4.6 分支 -> 推送 -> 这个工作流复验签名后创建 Release。
+# 附件永远是本地签好的字节，CI 不重新构建。
+
+on:
+  push:
+    branches: [release-1.4.6]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify signed assets
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum -c SHA256SUMS
+          export GNUPGHOME="$(mktemp -d)"
+          chmod 700 "${GNUPGHOME}"
+          gpg --batch --import dsh-signing-key.asc
+          fpr="$(gpg --with-colons --fingerprint 2>/dev/null | awk -F: '/^fpr:/{print $10; exit}')"
+          test "${fpr}" = "8E25C6FC8FA01719137FAAE6BC9AF5236E467872"
+          gpg --verify SHA256SUMS.asc SHA256SUMS
+          # The self-check script is an asset too; refuse a release where the
+          # signed manifest does not cover it.
+          grep -q '  smoke-remote.sh$' SHA256SUMS
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.4.6
+          name: DSH 1.4.6「鲸潮」
+          body_path: .github/release-body-1.4.6.md
+          draft: false
+          prerelease: false
+          make_latest: true
+          files: |
+            dist/dsh-1.4.6.tar.gz
+            dist/dsh-install-1.4.6.sh
+            dist/dsh-install.sh
+            dist/lisa-install.sh
+            dist/SHA256SUMS
+            dist/SHA256SUMS.asc
+            dist/dsh-signing-key.asc
+            dist/smoke-remote.sh
