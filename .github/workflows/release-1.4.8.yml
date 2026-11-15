@@ -1,0 +1,68 @@
+name: Release 1.4.8
+
+# 发布流程：在源码提交（tag 所指）上构建并签名 -> dist/ 提交到 release-1.4.8 分支
+# -> 先推 tag、再推分支触发本工作流。本工作流会：
+#   1) 校验 dist/ 的 SHA256 与签名
+#   2) 按 tag 重新构建一次 tarball，与 dist/ 逐字节比对（可复现性）
+#   3) 创建/更新 Release（tag 已存在，不会移动）
+# 附件永远是本地签好的字节，CI 不重新构建发布附件。
+
+on:
+  push:
+    branches: [release-1.4.8]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify signed assets
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum -c SHA256SUMS
+          export GNUPGHOME="$(mktemp -d)"
+          chmod 700 "${GNUPGHOME}"
+          gpg --batch --import dsh-signing-key.asc
+          fpr="$(gpg --with-colons --fingerprint 2>/dev/null | awk -F: '/^fpr:/{print $10; exit}')"
+          test "${fpr}" = "8E25C6FC8FA01719137FAAE6BC9AF5236E467872"
+          gpg --verify SHA256SUMS.asc SHA256SUMS
+          grep -q '  smoke-remote.sh$' SHA256SUMS
+
+      - name: Verify the tarball reproduces from the tag
+        # A verifier checks out the tag and rebuilds: SOURCE_DATE_EPOCH comes
+        # from that commit, so the tag MUST be the commit that was built.
+        # 1.4.7 got this wrong and produced a different hash.
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+          tag_sha="$(git rev-parse 'v1.4.8^{commit}')"
+          git worktree add /tmp/tagbuild "${tag_sha}"
+          ( cd /tmp/tagbuild && bash tools/build-release.sh --no-sign >/dev/null )
+          cmp /tmp/tagbuild/dist/dsh-1.4.8.tar.gz dist/dsh-1.4.8.tar.gz
+          echo "tag build reproduces the released tarball"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          tag_name: v1.4.8
+          name: DSH 1.4.8「鲸潮」
+          body_path: .github/release-body-1.4.8.md
+          draft: false
+          prerelease: false
+          make_latest: true
+          files: |
+            dist/dsh-1.4.8.tar.gz
+            dist/dsh-install-1.4.8.sh
+            dist/dsh-install.sh
+            dist/lisa-install.sh
+            dist/SHA256SUMS
+            dist/SHA256SUMS.asc
+            dist/dsh-signing-key.asc
+            dist/smoke-remote.sh
