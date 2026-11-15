@@ -51,10 +51,40 @@ current_version() {
     return 0
 }
 
+# _snapshot_payload_digest <snapshot-dir> <entry...>: stable digest over the
+# given snapshot entries (a file, or a whole directory tree). Entry paths and
+# file names go into the digest, so a rename, a dropped file or a modified
+# file all change it. Prints "none" when no entry exists at all.
+_snapshot_payload_digest() {
+    local dir="$1"; shift
+    local entry manifest digest found=0 f
+    manifest="$(mktemp)" || return 1
+    for entry in "$@"; do
+        if [[ -d "${dir}/${entry}" ]]; then
+            found=1
+            while IFS= read -r -d '' f; do
+                printf '%s %s\n' "${f#"${dir}"/}" "$(sha256sum "${f}" | cut -d' ' -f1)"
+            done < <(find "${dir}/${entry}" -type f -print0 | LC_ALL=C sort -z) >> "${manifest}"
+        elif [[ -f "${dir}/${entry}" ]]; then
+            found=1
+            printf '%s %s\n' "${entry}" "$(sha256sum "${dir}/${entry}" | cut -d' ' -f1)" >> "${manifest}"
+        fi
+    done
+    if [[ "${found}" -eq 0 ]]; then
+        rm -f "${manifest}" 2>/dev/null || true
+        printf 'none'
+        return 0
+    fi
+    digest="$(sha256sum "${manifest}" | cut -d' ' -f1)"
+    rm -f "${manifest}" 2>/dev/null || true
+    printf '%s' "${digest}"
+    return 0
+}
+
 # snapshot_create: takes a snapshot of the current install state and prints
 # the snapshot directory (stdout). Prunes to the newest SNAPSHOT_KEEP.
 snapshot_create() {
-    local stamp ver dir bin_sha conf_sha params_sha bin_sha_now suffix=1
+    local stamp ver dir bin_sha conf_sha params_sha units_sha geodata_sha bin_sha_now suffix=1
     stamp="$(date +%Y%m%d-%H%M%S)"
     ver="$(current_version)"
     dir="${SNAPSHOT_PARENT}/xray-backup-${stamp}-${ver}"
@@ -103,12 +133,18 @@ snapshot_create() {
     [[ -f "${dir}/xray.bin" ]] && bin_sha="$(sha256sum "${dir}/xray.bin" | cut -d' ' -f1)"
     [[ -f "${dir}/config.json" ]] && conf_sha="$(sha256sum "${dir}/config.json" | cut -d' ' -f1)"
     [[ -f "${dir}/node.params" ]] && params_sha="$(sha256sum "${dir}/node.params" | cut -d' ' -f1)"
+    # Units and geodata are part of the rollback payload too: a truncated
+    # unit can leave the service unstartable while binary/config still match.
+    units_sha="$(_snapshot_payload_digest "${dir}" xray.service xray@.service xray.service.d)"
+    geodata_sha="$(_snapshot_payload_digest "${dir}" share-xray)"
     {
         printf 'version=%s\n' "${ver}"
         printf 'created=%s\n' "${stamp}"
         printf 'binary_sha256=%s\n' "${bin_sha}"
         printf 'config_sha256=%s\n' "${conf_sha}"
         printf 'params_sha256=%s\n' "${params_sha}"
+        printf 'units_sha256=%s\n' "${units_sha}"
+        printf 'geodata_sha256=%s\n' "${geodata_sha}"
     } > "${dir}/meta.txt"
     chmod 700 "${dir}" || true
     log_info "snapshot created: ${dir} (version ${ver})"
@@ -238,7 +274,7 @@ snapshot_prune() {
 # Missing meta.txt, missing hash fields, a hash/file mismatch, or a file
 # that meta.txt does not record all fail closed (return 1).
 snapshot_verify_meta() {
-    local snap="$1" mode="$2" meta b_meta c_meta p_meta actual
+    local snap="$1" mode="$2" meta b_meta c_meta p_meta u_meta g_meta actual
     meta="${snap}/meta.txt"
     if [[ ! -f "${meta}" ]]; then
         die "snapshot meta.txt missing; refusing to restore ${snap}"
@@ -286,6 +322,20 @@ snapshot_verify_meta() {
             return 1
         elif [[ -z "${p_meta}" ]]; then
             log_warn "snapshot ${snap} predates params capture (no params_sha256); node.params will not be restored."
+        fi
+        u_meta="$(awk -F= '$1=="units_sha256"{print $2; exit}' "${meta}" | tr -d '\r')"
+        g_meta="$(awk -F= '$1=="geodata_sha256"{print $2; exit}' "${meta}" | tr -d '\r')"
+        if [[ -z "${u_meta}" || -z "${g_meta}" ]]; then
+            log_warn "snapshot ${snap} predates units/geodata verification (no digest); those payload parts will be restored unverified."
+        else
+            if [[ "$(_snapshot_payload_digest "${snap}" xray.service xray@.service xray.service.d)" != "${u_meta}" ]]; then
+                die "snapshot systemd units SHA256 mismatch; refusing to restore ${snap}"
+                return 1
+            fi
+            if [[ "$(_snapshot_payload_digest "${snap}" share-xray)" != "${g_meta}" ]]; then
+                die "snapshot geodata SHA256 mismatch; refusing to restore ${snap}"
+                return 1
+            fi
         fi
         if [[ -f "${snap}/config.json" ]]; then
             if [[ "${c_meta}" == "none" ]]; then

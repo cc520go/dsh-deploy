@@ -192,7 +192,9 @@ _ensure_env_tools() {
 # _check_port_443: fail when 443 is already taken by something other
 # than the running xray service (fresh node defaults to 443 and could
 # not bind). An active xray service on 443 is the reinstall/upgrade
-# path and passes. ss missing -> warn only, never a silent pass.
+# path and passes. ss missing is a HARD failure in production (no silent
+# pass): without ss the check cannot prove the port is free, so install
+# stops and asks for iproute2 instead of colliding later on bind.
 _check_port_443() {
     local ports
     # Test mode reads listen_ports from the canned fixture, so it never needs

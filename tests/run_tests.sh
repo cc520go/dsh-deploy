@@ -2238,6 +2238,131 @@ t_auth_timer_fail_closed() {
 }
 
 
+t_build_reproducible_flags() {
+    # A verifier building the same tag under a different umask must get the
+    # published hash: sorted names, fixed mtime/owner and NORMALIZED MODES.
+    # tools/ exists only in a repo checkout; in the released tarball there is
+    # no build script to inspect, so this check simply does not apply.
+    local f="${REPO_ROOT}/tools/build-release.sh"
+    [[ -f "${f}" ]] || return 0
+    grep -q -- '--sort=name' "${f}" || return 1
+    grep -q -- '--mtime=' "${f}" || return 1
+    grep -q -- '--owner=0' "${f}" || return 1
+    grep -q -- '--numeric-owner' "${f}" || return 1
+    grep -q -- "--mode='u+rwX,go+rX,go-w'" "${f}" || return 1
+    grep -q 'gzip -n' "${f}" || return 1
+    return 0
+}
+
+t_smoke_reality_only() {
+    # A Reality-only machine is a supported install. HY2 checks must be
+    # SKIPPED there (users read FAIL as "my install is broken"), while a
+    # HY2 install that is present but broken must still FAIL.
+    local d="${SANDBOX}/smoke-ro" out smoke
+    # In a repo checkout the script lives in tools/; a released tarball ships
+    # it at the top level.
+    smoke="${REPO_ROOT}/tools/smoke-remote.sh"
+    [[ -f "${smoke}" ]] || smoke="${REPO_ROOT}/smoke-remote.sh"
+    [[ -f "${smoke}" ]] || return 77
+    mkdir -p "${d}/bin" "${d}/tool"
+    cat > "${d}/bin/systemctl" <<'STUB'
+#!/usr/bin/env bash
+case "$*" in
+  *is-active*--quiet*xray*) exit 0 ;;
+  *is-active*--quiet*hysteria*) exit 1 ;;
+  *) exit 1 ;;
+esac
+STUB
+    cat > "${d}/bin/ss" <<'STUB'
+#!/usr/bin/env bash
+case "${1:-}" in
+  -tln) printf 'LISTEN 0 128 *:443 *:*\n' ;;
+  *) : ;;
+esac
+STUB
+    chmod 755 "${d}/bin/systemctl" "${d}/bin/ss"
+    printf '#!/usr/bin/env bash\n' > "${d}/launcher"
+    chmod 755 "${d}/launcher"
+
+    out="$(PATH="${d}/bin:${PATH}" LAUNCHER="${d}/launcher" TOOL_DIR="${d}/tool" \
+        HY2_BIN="${d}/none/hysteria" HY2_CONF="${d}/none/c.yaml" \
+        HY2_CONF_DIR="${d}/none" HY2_MARKER="${d}/none/marker" \
+        bash "${smoke}" 2>&1)"
+    printf '%s' "${out}" | grep -q 'HY2 未安装' || return 1
+    printf '%s' "${out}" | grep -qE '^FAIL  .*hy2' && return 1
+    printf '%s' "${out}" | grep -q '^FAIL  UDP 443' && return 1
+
+    # Same machine, but this time the add-on IS installed yet unhealthy.
+    : > "${d}/marker"
+    out="$(PATH="${d}/bin:${PATH}" LAUNCHER="${d}/launcher" TOOL_DIR="${d}/tool" \
+        HY2_BIN="${d}/none/hysteria" HY2_CONF="${d}/none/c.yaml" \
+        HY2_CONF_DIR="${d}/none" HY2_MARKER="${d}/marker" \
+        bash "${smoke}" 2>&1)"
+    printf '%s' "${out}" | grep -qE '^FAIL  hy2 服务' || return 1
+    return 0
+}
+
+t_snapshot_units_geodata() {
+    # Units and geodata are part of the rollback payload: a tampered unit or
+    # geodata file must be refused like a tampered config (1.4.5).
+    # shellcheck disable=SC1091
+    source "${REPO_ROOT}/lib/backup.sh"
+    local d="${SANDBOX}/units-geo" snap saved_parent out
+    saved_parent="${SNAPSHOT_PARENT}"
+    mkdir -p "${d}" "${XRAY_UNIT_DIR}" "${XRAY_SHARE_DIR}"
+    SNAPSHOT_PARENT="${d}"
+    render_config "PLACEHOLDER-UUID" "PLACEHOLDER-SID" "PLACEHOLDER-PRIVATE-KEY" \
+        "sni.example" "443" "vision" "www.apple.com:443" "${XRAY_CONF}" || return 1
+    printf '# unit\n' > "${XRAY_UNIT_DIR}/xray.service"
+    printf '# template\n' > "${XRAY_UNIT_DIR}/xray@.service"
+    printf 'geoip-placeholder\n' > "${XRAY_SHARE_DIR}/geoip.dat"
+
+    snap="$(snapshot_create)" || return 1
+    grep -qE '^units_sha256=[0-9a-f]{64}$' "${snap}/meta.txt" || return 1
+    grep -qE '^geodata_sha256=[0-9a-f]{64}$' "${snap}/meta.txt" || return 1
+
+    # Tampered unit -> refuse before touching anything.
+    printf '# tampered\n' >> "${snap}/xray.service"
+    expect_fail snapshot_restore "${snap}" full || return 1
+
+    # Tampered geodata -> refuse too.
+    snap="$(snapshot_create)" || return 1
+    printf 'tampered\n' >> "${snap}/share-xray/geoip.dat"
+    expect_fail snapshot_restore "${snap}" full || return 1
+
+    # Legacy snapshots (no digest lines) stay restorable, with a warning.
+    snap="$(snapshot_create)" || return 1
+    grep -vE '^(units|geodata)_sha256=' "${snap}/meta.txt" > "${snap}/meta.new"
+    mv "${snap}/meta.new" "${snap}/meta.txt"
+    out="$(snapshot_restore "${snap}" full 2>&1)" || return 1
+    printf '%s' "${out}" | grep -q 'predates units/geodata' || return 1
+    SNAPSHOT_PARENT="${saved_parent}"
+    return 0
+}
+
+t_bbr_status_semantics() {
+    # Runtime bbr/fq that DSH never persisted used to print "NOT effective"
+    # directly under "congestion: bbr / qdisc: fq". The two states are now
+    # reported separately and neither contradicts the other.
+    local out rc
+    bbr_test_setup || return 1
+    printf 'congestion=bbr\nqdisc=fq\n' > "${FAKE_SYSCTL_STATE}"
+    out="$(bbr_status 2>&1)" && rc=0 || rc=$?
+    [[ "${rc}" -ne 0 ]] || return 1
+    printf '%s' "${out}" | grep -q 'runtime        : ACTIVE' || return 1
+    printf '%s' "${out}" | grep -q 'persist        : ABSENT' || return 1
+    printf '%s' "${out}" | grep -q 'NOT persisted by DSH' || return 1
+    printf '%s' "${out}" | grep -qi 'not effective' && return 1
+
+    bbr_enable >/dev/null 2>&1 || return 1
+    out="$(bbr_status 2>&1)" || return 1
+    printf '%s' "${out}" | grep -q 'runtime        : ACTIVE' || return 1
+    printf '%s' "${out}" | grep -q 'persist        : PRESENT' || return 1
+    printf '%s' "${out}" | grep -q 'effective and persisted' || return 1
+    return 0
+}
+
+
 run_test t_version
 run_test t_dgst
 run_test t_urlencode
@@ -2297,6 +2422,10 @@ run_test t_hy2_masquerade_url
 run_test t_test_override_production
 run_test t_mirror_protocol
 run_test t_hy2_temp_perms
+run_test t_build_reproducible_flags
+run_test t_smoke_reality_only
+run_test t_snapshot_units_geodata
+run_test t_bbr_status_semantics
 run_test t_hy2_snapshot_restore_verified
 run_test t_hy2_rollback_honest_failure
 run_test t_snapshot_params_roundtrip

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
-# tools/smoke-remote.sh — acceptance checklist for a machine that is
-# supposed to run DSH with the Hysteria2 add-on.
+# tools/smoke-remote.sh — acceptance checklist for a machine that runs DSH.
+# The Hysteria2 add-on is optional: when it is not installed the HY2 checks
+# are skipped (not failed), because a Reality-only node is a valid install.
 #
 # Runs ON THE SERVER, read-only: it never starts, stops, edits or removes
 # anything. Every check prints PASS / FAIL / SKIP and the script exits
@@ -59,6 +60,17 @@ else
 fi
 
 # ---------------------------------------------------------------- hy2 ----
+# HY2 is OPTIONAL. A Reality-only machine is a supported deployment, so
+# "HY2 not installed" must not read as a failed smoke run: judge the HY2
+# items only when this add-on is actually present, and skip the block once
+# when it is not (the main-line Reality checks above still ran).
+hy2_present() {
+    [[ -f "${HY2_MARKER}" ]] || [[ -x "${HY2_BIN}" ]] || [[ -f "${HY2_CONF}" ]] \
+        || [[ -f "/etc/systemd/system/${HY2_SERVICE}.service" ]]
+}
+
+smoke_hy2_checks() {
+
 if systemctl is-active --quiet "${HY2_SERVICE}"; then ok "hy2 服务 active"; else no "hy2 服务不是 active"; fi
 if systemctl is-enabled --quiet "${HY2_SERVICE}" 2>/dev/null; then ok "hy2 开机自启 enabled"; else no "hy2 没有 enable，重启后不会自己起"; fi
 
@@ -220,6 +232,15 @@ EOF
     fi
 else
     skipit "反向测试未启用（用 --full 跑）"
+fi
+
+
+}
+
+if hy2_present; then
+    smoke_hy2_checks
+else
+    skipit "HY2 未安装（可选协议，按设计跳过全部 HY2 检查；主线 Reality 检查已全部执行）"
 fi
 
 # ---------------------------------------------------------------- report ----

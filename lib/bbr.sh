@@ -217,31 +217,47 @@ bbr_version() {
     return 0
 }
 
-# bbr_status: read-only effective check. Exit 0 when congestion=bbr,
-# qdisc=fq and a persisted DSH sysctl file exists; else 1.
+# bbr_status: read-only. Reports the RUNTIME state (is bbr/fq active right
+# now) and the PERSISTED state (did DSH write its sysctl file, so it survives
+# a reboot) on SEPARATE lines: a cloud image may already run bbr/fq that DSH
+# never persisted, and calling that "NOT effective" was misleading.
+# Exit 0 only when runtime is bbr/fq AND DSH persisted it; exit 1 otherwise.
 bbr_status() {
-    local cong qdisc ver f ok=1
+    local cong qdisc ver f runtime_ok=1 persist_ok=1
     cong="$(bbr_congestion)"
     qdisc="$(bbr_qdisc)"
     ver="$(bbr_module_version)"
     f="$(bbr_current_sysctl_file)"
-    printf 'kernel         : %s\n' "$(uname -r)"
+
+    printf 'kernel         : %s\n' "$(uname -r 2>/dev/null || printf 'unknown')"
     printf 'tcp_bbr version: %s\n' "${ver}"
-    printf 'congestion     : %s (expected bbr)\n' "${cong}"
-    printf 'qdisc          : %s (expected fq)\n' "${qdisc}"
-    [[ "${cong}" == "bbr" ]] || ok=0
-    [[ "${qdisc}" == "fq" ]] || ok=0
-    if [[ -f "${f}" ]]; then
-        printf 'DSH sysctl     : present (%s)\n' "${f}"
+    printf 'congestion     : %s\n' "${cong}"
+    printf 'qdisc          : %s\n' "${qdisc}"
+
+    if [[ "${cong}" == "bbr" && "${qdisc}" == "fq" ]]; then
+        printf 'runtime        : ACTIVE (congestion=bbr, qdisc=fq)\n'
     else
-        printf 'DSH sysctl     : absent (runtime bbr/fq may come from another tool and will not persist)\n'
-        ok=0
+        runtime_ok=0
+        printf 'runtime        : NOT ACTIVE (want congestion=bbr/qdisc=fq, got %s/%s)\n' \
+            "${cong:-unknown}" "${qdisc:-unknown}"
     fi
-    if [[ "${ok}" -eq 1 ]]; then
-        printf 'BBR+FQ: effective (module version %s: 1 = official BBRv1, 3 = external BBRv3 kernel).\n' "${ver}"
+
+    if [[ -f "${f}" ]]; then
+        printf 'persist        : PRESENT (%s; survives reboot)\n' "${f}"
+    else
+        persist_ok=0
+        printf 'persist        : ABSENT (DSH wrote no sysctl file; a reboot may fall back to the system default)\n'
+    fi
+
+    if [[ "${runtime_ok}" -eq 1 && "${persist_ok}" -eq 1 ]]; then
+        printf 'result         : BBR+FQ effective and persisted (module version %s: 1 = official BBRv1, 3 = external BBRv3 kernel).\n' "${ver}"
         return 0
     fi
-    printf 'BBR+FQ: NOT effective (see mismatches above).\n'
+    if [[ "${runtime_ok}" -eq 1 ]]; then
+        printf 'result         : BBR+FQ active now but NOT persisted by DSH; run "DSH bbr enable" to keep it across reboots.\n'
+        return 1
+    fi
+    printf 'result         : BBR+FQ not effective; run "DSH bbr enable".\n'
     return 1
 }
 

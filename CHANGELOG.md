@@ -2,6 +2,38 @@
 
 记录 DSH 脚本自身的版本；Xray 核心版本见 `VERSION`。
 
+## 1.4.5 — 2026-11-15
+
+基线：1.4.4。按 1.4.4 闭环审查的 5 条修复，不新增功能。
+
+### 修复
+
+- **跨机复现构建**：`tar` 增加 `--mode='u+rwX,go+rX,go-w'` 归一化权限。
+  之前只固定了排序、mtime、owner，文件权限仍跟随构建者的 umask，外部验证者
+  按 tag 构建得不到发布哈希。现在不同 umask 构建出的 tarball 哈希一致。
+- **Reality-only 安装不再被 smoke 误报为失败**：HY2 是可选的。以前没装 HY2
+  时 8 项 HY2 检查全 FAIL、结论“未通过”，用户会以为安装坏了。现在检测到
+  HY2 未安装就整体 SKIP 并说明是可选协议；装了但服务/配置坏了仍然 FAIL。
+- **快照校验补 units + geodata**：`meta.txt` 记录 `units_sha256` /
+  `geodata_sha256`（含文件名与目录树），恢复前一并校验；被篡改的 systemd
+  unit 或 geodata 文件会像损坏的 config 一样被拒绝。1.4.5 之前的旧快照没有
+  这两行时打警告并保持可恢复。
+- **BBR 状态文案不再自相矛盾**：`DSH bbr status` 拆成 `runtime` 与 `persist`
+  两行，分别报告“当前是否 bbr/fq”和“是否由 DSH 写进 sysctl（重启后仍在）”。
+  运行时有 bbr/fq 但非 DSH 持久化时，输出“active now but NOT persisted by
+  DSH”，不再在 `congestion: bbr` 下面写 “NOT effective”。退出码仍是只有
+  两者都满足才为 0。
+- **注释同步**：`_check_port_443` 上方注释原写 “ss missing -> warn only”，
+  与实际失败关闭的代码不符，已改正。
+
+### 测试
+
+- 本机：78 passed / 0 failed / 1 skipped（缺 `zip` 的 `t_archive_xray`）。
+- 新增回归：`t_build_reproducible_flags`、`t_smoke_reality_only`、
+  `t_snapshot_units_geodata`、`t_bbr_status_semantics`。
+- 真机（Debian 12）：跨 umask 构建哈希一致；Reality-only 安装 smoke 全 PASS
+  + HY2 一项 SKIP；篡改 unit/geodata 的快照被拒绝恢复。
+
 ## 1.4.4 — 2026-11-15
 
 基线：1.4.3。本版只修真机验收（清空 → 全新安装 → `smoke-remote.sh --full` →

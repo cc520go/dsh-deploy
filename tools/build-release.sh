@@ -114,7 +114,11 @@ if [[ -z "${SOURCE_DATE_EPOCH:-}" ]]; then
     [[ -n "${SOURCE_DATE_EPOCH}" ]] || SOURCE_DATE_EPOCH="$(date +%s)"
 fi
 export SOURCE_DATE_EPOCH
+# --mode normalizes permissions (files 644, dirs/executables 755) so a
+# verifier building the same tag under a different umask still gets the
+# published hash; without it the payload modes follow the builder's umask.
 tar --sort=name --mtime="@${SOURCE_DATE_EPOCH}" --owner=0 --group=0 --numeric-owner \
+    --mode='u+rwX,go+rX,go-w' \
     -cf - -C "${STAGE}" "${NAME}" | gzip -n > "${TARBALL}"
 info "built $(basename "${TARBALL}") ($(du -h "${TARBALL}" | cut -f1))"
 
