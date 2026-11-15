@@ -78,20 +78,23 @@ loopback_flow_line() {
     fi
 }
 
-# build_loopback_client_config <outfile> <uuid> <sni> <pub> <sid> <flow> <port>
+# build_loopback_client_config <outfile> <uuid> <sni> <pub> <sid> <flow> <socks-port> [node-port]
 # Writes the temporary loopback client config used by
 # loopback_reality_test (600, no secrets printed). Extracted as its
 # own function so tests can inspect the generated config directly
-# instead of only mocking the probe result.
+# instead of only mocking the probe result. [node-port] defaults to 443,
+# the node's real listen port is passed in by the caller so non-443
+# installs are diagnosed correctly.
 build_loopback_client_config() {
     local outfile="$1" uuid="$2" sni="$3" pub="$4" sid="$5" flow="$6" port="$7"
+    local node_port="${8:-443}"
     local flow_line
     flow_line="$(loopback_flow_line "${flow}")"
     cat > "${outfile}" <<EOF
 {
   "log": {"loglevel": "warning"},
   "inbounds": [{"port": ${port}, "listen": "127.0.0.1", "protocol": "socks", "settings": {"udp": true}}],
-  "outbounds": [{"protocol": "vless", "settings": {"vnext": [{"address": "127.0.0.1", "port": 443, "users": [{"id": "${uuid}", "encryption": "none"${flow_line}}]}]}, "streamSettings": {"network": "tcp", "security": "reality", "realitySettings": {"show": false, "fingerprint": "chrome", "serverName": "${sni}", "publicKey": "${pub}", "shortId": "${sid}"}}}]
+  "outbounds": [{"protocol": "vless", "settings": {"vnext": [{"address": "127.0.0.1", "port": ${node_port}, "users": [{"id": "${uuid}", "encryption": "none"${flow_line}}]}]}, "streamSettings": {"network": "tcp", "security": "reality", "realitySettings": {"show": false, "fingerprint": "chrome", "serverName": "${sni}", "publicKey": "${pub}", "shortId": "${sid}"}}}]
 }
 EOF
     chmod 600 "${outfile}" || true
@@ -115,7 +118,8 @@ loopback_reality_test() {
             skip) printf 'loopback Reality test skipped (test mode)\n'; return 2 ;;
         esac
     fi
-    local uuid sni pub sid flow port tmpdir tmpconf pid
+    local uuid sni pub sid flow port node_port tmpdir tmpconf pid
+    node_port="$(read_node_param port)"; node_port="${node_port:-443}"
     uuid="$(read_node_param uuid)"; sni="$(read_node_param sni)"
     pub="$(read_node_param public_key)"; sid="$(read_node_param shortid)"
     flow="$(read_node_param flow)"
@@ -131,7 +135,7 @@ loopback_reality_test() {
     tmpdir="$(mktemp -d)" || { printf 'loopback Reality test skipped (cannot create temp dir)\n'; return 2; }
     tmpconf="${tmpdir}/client.json"
     port=$((20000 + RANDOM % 20000))
-    build_loopback_client_config "${tmpconf}" "${uuid}" "${sni}" "${pub}" "${sid}" "${flow}" "${port}"
+    build_loopback_client_config "${tmpconf}" "${uuid}" "${sni}" "${pub}" "${sid}" "${flow}" "${port}" "${node_port}"
     "${XRAY_BIN}" run -config "${tmpconf}" >/dev/null 2>&1 &
     pid=$!
     # Wait up to ~5s for the local socks listener, then probe once.
@@ -144,7 +148,7 @@ loopback_reality_test() {
         if curl -fsSL --socks5-hostname "127.0.0.1:${port}" --max-time 10 "https://example.com" -o /dev/null 2>/dev/null; then
             kill "${pid}" 2>/dev/null || true; wait "${pid}" 2>/dev/null || true
             rm -rf -- "${tmpdir}"
-            printf 'loopback Reality test passed (local client -> 127.0.0.1:443 -> internet)\n'; return 0
+            printf 'loopback Reality test passed (local client -> 127.0.0.1:${node_port} -> internet)\n'; return 0
         fi
     fi
     kill "${pid}" 2>/dev/null || true; wait "${pid}" 2>/dev/null || true
@@ -156,7 +160,7 @@ loopback_reality_test() {
     if ! curl -4 -fsSL --connect-timeout 8 --max-time 15 "https://example.com" -o /dev/null 2>/dev/null; then
         printf 'loopback Reality test skipped (no outbound network from this server; cannot judge the node)\n'; return 2
     fi
-    printf 'loopback Reality test FAILED (local client could not complete a request through 127.0.0.1:443; server config itself is unchanged)\n'; return 1
+    printf 'loopback Reality test FAILED (local client could not complete a request through 127.0.0.1:${node_port}; server config itself is unchanged)\n'; return 1
 }
 
 # diagnose_restore_offer: called only when main() saw a FAIL.
@@ -274,24 +278,26 @@ main() {
     cat "${perms_tmp}" 2>/dev/null || true
     rm -f "${perms_tmp}"
 
-    # 5. Port listening (443) + owner.
+    # 5. Port listening (the node's real port) + owner.
+    local listen_port
+    listen_port="$(read_node_param port)"; listen_port="${listen_port:-443}"
     if in_test_mode; then
         local ports
         ports="$(listen_ports)"
         case " ${ports} " in
-            *" 443 "*) check_pass "port 443 listening (test-mode ports: ${ports})" ;;
-            *) check_fail "port 443 NOT listening (test-mode ports: ${ports})" ;;
+            *" ${listen_port} "*) check_pass "port ${listen_port} listening (test-mode ports: ${ports})" ;;
+            *) check_fail "port ${listen_port} NOT listening (test-mode ports: ${ports})" ;;
         esac
         check_skip "port owner check (test mode)"
     elif command -v ss >/dev/null 2>&1; then
-        local line443
-        line443="$(ss -tlnp 2>/dev/null | grep -E ':(443)[[:space:]]' | head -1)"
-        if [[ -z "${line443}" ]]; then
-            check_fail "port 443 NOT listening"
-        elif printf '%s' "${line443}" | grep -q 'xray'; then
-            check_pass "port 443 listening (process: xray)"
+        local lineport
+        lineport="$(ss -tlnp 2>/dev/null | grep -E ":${listen_port}[[:space:]]" | head -1)"
+        if [[ -z "${lineport}" ]]; then
+            check_fail "port ${listen_port} NOT listening"
+        elif printf '%s' "${lineport}" | grep -q 'xray'; then
+            check_pass "port ${listen_port} listening (process: xray)"
         else
-            check_warn "port 443 listening but owner is not xray: ${line443}"
+            check_warn "port ${listen_port} listening but owner is not xray: ${lineport}"
         fi
     else
         check_skip "ss not found; port check unavailable"

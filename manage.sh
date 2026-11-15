@@ -58,7 +58,7 @@ usage() {
     printf 'Usage: %s [command] [args]\n' "$(basename "$0")"
     printf 'Commands: status, version, check-update, install [ver], upgrade [ver], downgrade [ver],\n'
     printf '          rollback [snapshot], backup, restore [snapshot], node <sub>,\n'
-    printf '          share, diag [--loopback], logs, uninstall, bbr <sub>, auth,\n'
+    printf '          share, diag [--loopback], logs, uninstall [--yes] [--purge], bbr <sub>, auth,\n'
     printf '          hy2 <install|uninstall|link|status|logs|rotate-cert|sni|restore|snapshot>, smoke, menu, help\n'
     printf 'auth = menu 1, 更改认证方式（关闭密码、开启密钥登录）\n'
     printf 'hy2 = Hysteria2 附加协议（菜单 13-18，20 = 自定义伪装域名）。\n'
@@ -881,7 +881,8 @@ _uninstall_rm_tree() {
     if rm -rf -- "${p}"; then
         log_info "${label} removed: ${p}"
     else
-        log_warn "could not remove ${label}: ${p}"
+        log_error "could not remove ${label}: ${p}"
+        return 1
     fi
     return 0
 }
@@ -893,27 +894,39 @@ _uninstall_rm_tree() {
 # hy2-backup-*) and node.params are KEPT; only a triple-confirmed purge
 # deletes the state dir.
 cmd_uninstall() {
-    local purge=0 ans ans2 lrdir f link target
-    confirm "Impact: HY2 is removed first (service, binary, config, certs), then Xray (binary, units, geodata) and everything this tool installed: launchers, tool dir, logrotate rule, BBR/UDP sysctl. Snapshots and node.params are KEPT. A snapshot backup is taken first." || { log_info "uninstall cancelled."; return 1; }
-    printf 'Also delete the DSH state dir %s (node.params, BBR backups)? [y/N]: ' "${DSH_STATE_DIR}"
-    read -r ans || ans=""
-    case "${ans}" in
-        y|Y|yes|YES)
-            # Purge needs three affirmatives: this prompt, the confirm
-            # below, and the re-typed "yes". Any decline keeps the state.
-            if confirm "Impact: PURGE will delete ${DSH_STATE_DIR} (node.params, BBR backups) and the official installer will also remove ${XRAY_CONF_DIR}/config.json. Snapshots are still kept, but this state cannot be restored except from a snapshot."; then
-                printf 'Type "yes" again to confirm PURGE (delete state dir): '
-                read -r ans2 || ans2=""
-                if [[ "${ans2}" == "yes" ]]; then
-                    purge=1
+    local purge=0 ans ans2 lrdir f link target assume_yes=0 rc=0
+    # --yes/--purge make this usable from a non-interactive SSH session: without
+    # them confirm() waits on stdin and a scripted call just hangs.
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --yes|-y) assume_yes=1 ;;
+            --purge) purge=1; assume_yes=1 ;;
+            *) die "uninstall: unknown option '$1' (supported: --yes --purge)"; return 1 ;;
+        esac
+        shift
+    done
+    if [[ "${assume_yes}" -eq 0 ]]; then
+        confirm "Impact: HY2 is removed first (service, binary, config, certs), then Xray (binary, units, geodata) and everything this tool installed: launchers, tool dir, logrotate rule, BBR/UDP sysctl. Snapshots and node.params are KEPT. A snapshot backup is taken first." || { log_info "uninstall cancelled."; return 1; }
+        printf 'Also delete the DSH state dir %s (node.params, BBR backups)? [y/N]: ' "${DSH_STATE_DIR}"
+        read -r ans || ans=""
+        case "${ans}" in
+            y|Y|yes|YES)
+                # Purge needs three affirmatives: this prompt, the confirm
+                # below, and the re-typed "yes". Any decline keeps the state.
+                if confirm "Impact: PURGE will delete ${DSH_STATE_DIR} (node.params, BBR backups) and the official installer will also remove ${XRAY_CONF_DIR}/config.json. Snapshots are still kept, but this state cannot be restored except from a snapshot."; then
+                    printf 'Type "yes" again to confirm PURGE (delete state dir): '
+                    read -r ans2 || ans2=""
+                    if [[ "${ans2}" == "yes" ]]; then
+                        purge=1
+                    else
+                        log_info "purge not confirmed; continuing with state kept."
+                    fi
                 else
-                    log_info "purge not confirmed; continuing with state kept."
+                    log_info "purge declined; continuing with state kept."
                 fi
-            else
-                log_info "purge declined; continuing with state kept."
-            fi
-            ;;
-    esac
+                ;;
+        esac
+    fi
     snapshot_create >/dev/null || true
 
     # 1) HY2 first. --yes: menu 21 already confirmed the whole uninstall.
@@ -921,7 +934,8 @@ cmd_uninstall() {
     # foreign/partial HY2 must never block the Xray uninstall (its marker
     # check refuses to delete a directory this tool does not own).
     if ! hy2_cmd_uninstall --yes --keep-snapshots; then
-        log_warn "HY2 未完全卸载（多半是 ${HY2_CONF_DIR} 没有本项目标记，已按设计拒绝删除）；继续卸载 Xray，残留请手动处理。"
+        log_error "HY2 未完全卸载（多半是 ${HY2_CONF_DIR} 没有本项目标记，已按设计拒绝删除）。"
+        rc=1
     fi
     hy2_untune_udp || true
 
@@ -963,28 +977,41 @@ cmd_uninstall() {
     for f in "${lrdir}/dsh" "${lrdir}/xray-reality-manager"; do
         [[ -f "${f}" ]] || continue
         if grep -q '/var/log/xray/\*\.log' "${f}" 2>/dev/null; then
-            rm -f -- "${f}" && log_info "logrotate rule removed: ${f}"
+            if rm -f -- "${f}"; then
+                log_info "logrotate rule removed: ${f}"
+            else
+                log_error "could not remove logrotate rule: ${f}"
+                rc=1
+            fi
         fi
     done
 
     # 6) sysctl：BBR 由 bbr 模块清理（含运行时回到 cubic/fq_codel），
     #    UDP 缓冲在 HY2 卸载里已经清过，这里兜底再跑一次（幂等）。
     _bbr_lib
-    bbr_remove_persisted || log_warn "BBR sysctl 清理未完成，请检查 ${BBR_SYSCTL_FILE}。"
+    bbr_remove_persisted || { log_error "BBR sysctl 清理未完成，请检查 ${BBR_SYSCTL_FILE}。"; rc=1; }
     hy2_untune_udp || true
 
     # 7) 工具目录：当前目录和 1.0.x 的旧目录（只删确实是本工具的那份）。
-    _uninstall_rm_tree "${TOOL_INSTALL_DIR}" "tool dir"
+    _uninstall_rm_tree "${TOOL_INSTALL_DIR}" "tool dir" || rc=1
     if [[ "${LEGACY_TOOL_DIR}" != "${TOOL_INSTALL_DIR}" && -f "${LEGACY_TOOL_DIR}/manage.sh" ]]; then
-        _uninstall_rm_tree "${LEGACY_TOOL_DIR}" "legacy tool dir"
+        _uninstall_rm_tree "${LEGACY_TOOL_DIR}" "legacy tool dir" || rc=1
     fi
 
     # 8) purge 只删状态目录（node.params、BBR 备份）；快照永远保留。
     if [[ "${purge}" -eq 1 ]]; then
-        _uninstall_rm_tree "${DSH_STATE_DIR}" "state dir"
-        log_info "purge complete: state dir deleted (node.params and BBR backups are gone)."
+        if _uninstall_rm_tree "${DSH_STATE_DIR}" "state dir"; then
+            log_info "purge complete: state dir deleted (node.params and BBR backups are gone)."
+        else
+            log_error "purge incomplete: ${DSH_STATE_DIR} could not be fully removed."
+            rc=1
+        fi
     else
         log_info "state kept: ${DSH_STATE_DIR} (node.params, BBR backups)."
+    fi
+    if [[ "${rc}" -ne 0 ]]; then
+        log_error "uninstall INCOMPLETE: some parts could not be removed (see the errors above); re-run or clean them up by hand."
+        return 1
     fi
     log_info "uninstall complete. Snapshots kept: ${SNAPSHOT_PARENT}/xray-backup-*, ${HY2_SNAPSHOT_PARENT}/hy2-backup-*."
     return 0
@@ -1129,7 +1156,7 @@ main() {
         auth-confirm) cmd_auth_confirm ;;
         auth-rollback) cmd_auth_rollback ;;
         logs) cmd_logs ;;
-        uninstall) cmd_uninstall ;;
+        uninstall) cmd_uninstall "$@" ;;
         bbr) cmd_bbr "$@" ;;
         hy2) hy2_cmd "$@" ;;
         smoke) cmd_smoke "$@" ;;

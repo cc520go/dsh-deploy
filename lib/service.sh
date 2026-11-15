@@ -36,12 +36,37 @@ service_reload_units() { run_systemctl daemon-reload; }
 # restored config passes config_test, and the service restarted. Returns 1
 # otherwise; callers must report a failed rollback honestly instead of
 # claiming the previous state was restored.
+# verify_restored_state <snapshot>: 0 only when the live core version matches
+# what the snapshot recorded (when known) AND the node port is listening.
+# "restored and verified" must mean the snapshot's own state came back, not
+# just that the individual steps happened to return 0.
+verify_restored_state() {
+    local snap="$1" snap_ver cur_ver port
+    snap_ver="$(grep '^version=' "${snap}/meta.txt" 2>/dev/null | cut -d'=' -f2)"
+    cur_ver="$(current_version)"
+    if [[ -n "${snap_ver}" && "${snap_ver}" != "unknown" && "${snap_ver}" != "${cur_ver}" ]]; then
+        log_error "restore verification: live version is ${cur_ver}, snapshot recorded ${snap_ver}"
+        return 1
+    fi
+    port="$(read_node_param port 2>/dev/null || true)"
+    if [[ -z "${port}" ]]; then
+        log_error "restore verification: node port unknown (node.params missing)"
+        return 1
+    fi
+    if ! wait_for_listening "${port}"; then
+        log_error "restore verification: port ${port} is not listening"
+        return 1
+    fi
+    return 0
+}
+
 restore_upgrade_snapshot() {
     local snap="$1" ok=1
     snapshot_restore "${snap}" full || ok=0
     migrate_permissions || ok=0
     config_test "${XRAY_CONF}" || ok=0
     service_restart || ok=0
+    verify_restored_state "${snap}" || ok=0
     if [[ "${ok}" -eq 1 ]]; then
         log_info "upgrade rollback restored and verified: ${snap}"
         return 0
@@ -123,7 +148,13 @@ upgrade_core() {
         return 1
     }
     # Units changed: reload before any (re)start so systemd sees the new units.
-    service_reload_units || true
+    # A failed reload means the service would run under the OLD unit, so it is
+    # a hard failure, not a warning.
+    service_reload_units || {
+        log_error "daemon-reload failed after installing the new units; restoring snapshot."
+        abort_upgrade "daemon-reload failed" "${snap}"
+        return 1
+    }
     migrate_permissions || {
         log_error "permission migration failed; restoring snapshot."
         abort_upgrade "permission migration failed" "${snap}"
@@ -153,7 +184,16 @@ upgrade_core() {
         abort_upgrade "version verification failed" "${snap}"
         return 1
     fi
-    log_info "upgrade complete: ${cur} -> ${target} (snapshot kept: ${snap})."
+    # systemctl restart returns 0 as soon as a Type=simple unit starts, even
+    # if the process dies a moment later: require the node port to listen.
+    local listen_port
+    listen_port="$(read_node_param port 2>/dev/null || true)"
+    if [[ -z "${listen_port}" ]] || ! wait_for_listening "${listen_port}"; then
+        log_error "service is not listening on port ${listen_port:-<unknown>} after upgrade; restoring snapshot."
+        abort_upgrade "port ${listen_port:-<unknown>} is not listening after upgrade" "${snap}"
+        return 1
+    fi
+    log_info "upgrade complete: ${cur} -> ${target}, listening on ${listen_port} (snapshot kept: ${snap})."
     return 0
 }
 
@@ -216,6 +256,14 @@ rollback_core() {
             die "rollback aborted: service failed to restart; pre-rollback state restored and verified."
         else
             die "rollback aborted: service failed to restart; ROLLBACK FAILED: pre-rollback state could not be restored/verified; node may still be faulty (snapshot: ${pre})."
+        fi
+        return 1
+    fi
+    if ! verify_restored_state "${snap}"; then
+        if restore_upgrade_snapshot "${pre}"; then
+            die "rollback aborted: restored state failed verification; pre-rollback state restored and verified."
+        else
+            die "rollback aborted: restored state failed verification; ROLLBACK FAILED: pre-rollback state could not be restored/verified; node may still be faulty (snapshot: ${pre})."
         fi
         return 1
     fi

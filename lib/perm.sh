@@ -55,6 +55,14 @@ migrate_permissions() {
         fi
         chmod 640 "${XRAY_CONF}" || { die "chmod config failed"; return 1; }
     fi
+    # The binary is public (no secret in it) but must not be writable by the
+    # service user: 755 root:root is the audited layout.
+    if [[ -f "${XRAY_BIN}" ]]; then
+        if [[ "${XRAY_TEST_MODE:-0}" != "1" ]]; then
+            chown root:root "${XRAY_BIN}" || { die "chown binary failed"; return 1; }
+        fi
+        chmod 755 "${XRAY_BIN}" || { die "chmod binary failed"; return 1; }
+    fi
     if [[ -d "${XRAY_SHARE_DIR}" ]]; then
         if [[ "${XRAY_TEST_MODE:-0}" != "1" ]]; then
             chown xray:xray "${XRAY_SHARE_DIR}" 2>/dev/null || true
@@ -96,6 +104,27 @@ validate_permissions() {
         fi
     else
         printf '[FAIL] config dir missing: %s\n' "${XRAY_CONF_DIR}"
+        fail=1
+    fi
+    if [[ -f "${XRAY_BIN}" ]]; then
+        mode="$(stat -c '%a' "${XRAY_BIN}")"
+        if [[ "${mode}" == "755" ]]; then
+            printf '[PASS] binary mode 755: %s\n' "${XRAY_BIN}"
+        else
+            printf '[FAIL] binary mode is %s, expected 755: %s\n' "${mode}" "${XRAY_BIN}"
+            fail=1
+        fi
+        if [[ "${XRAY_TEST_MODE:-0}" != "1" ]]; then
+            owner="$(stat -c '%U:%G' "${XRAY_BIN}")"
+            if [[ "${owner}" == "root:root" ]]; then
+                printf '[PASS] binary owner root:root\n'
+            else
+                printf '[FAIL] binary owner is %s, expected root:root\n' "${owner}"
+                fail=1
+            fi
+        fi
+    else
+        printf '[FAIL] binary missing: %s\n' "${XRAY_BIN}"
         fail=1
     fi
     if [[ -f "${XRAY_CONF}" ]]; then

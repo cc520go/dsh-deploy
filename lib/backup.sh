@@ -325,17 +325,24 @@ snapshot_verify_meta() {
         fi
         u_meta="$(awk -F= '$1=="units_sha256"{print $2; exit}' "${meta}" | tr -d '\r')"
         g_meta="$(awk -F= '$1=="geodata_sha256"{print $2; exit}' "${meta}" | tr -d '\r')"
-        if [[ -z "${u_meta}" || -z "${g_meta}" ]]; then
-            log_warn "snapshot ${snap} predates units/geodata verification (no digest); those payload parts will be restored unverified."
-        else
+        # Verify each payload independently: a snapshot that records only one
+        # of the two digests must still have the OTHER one checked (the old
+        # both-or-nothing test let one deleted line disable both checks).
+        if [[ -n "${u_meta}" ]]; then
             if [[ "$(_snapshot_payload_digest "${snap}" xray.service xray@.service xray.service.d)" != "${u_meta}" ]]; then
                 die "snapshot systemd units SHA256 mismatch; refusing to restore ${snap}"
                 return 1
             fi
+        elif [[ -e "${snap}/xray.service" || -e "${snap}/xray@.service" || -d "${snap}/xray.service.d" ]]; then
+            log_warn "snapshot ${snap} has systemd units but no units_sha256 (legacy); they will be restored unverified."
+        fi
+        if [[ -n "${g_meta}" ]]; then
             if [[ "$(_snapshot_payload_digest "${snap}" share-xray)" != "${g_meta}" ]]; then
                 die "snapshot geodata SHA256 mismatch; refusing to restore ${snap}"
                 return 1
             fi
+        elif [[ -d "${snap}/share-xray" ]]; then
+            log_warn "snapshot ${snap} has geodata but no geodata_sha256 (legacy); it will be restored unverified."
         fi
         if [[ -f "${snap}/config.json" ]]; then
             if [[ "${c_meta}" == "none" ]]; then
@@ -381,6 +388,12 @@ snapshot_restore() {
             || { die "restore: failed to restore binary"; return 1; }
         chmod 755 "${XRAY_BIN}" || true
         log_info "restored binary from ${snap}"
+    elif [[ "${mode}" == "full" ]]; then
+        # A full rollback without the recorded binary would leave the node on
+        # whatever version happens to be installed, so refuse instead of
+        # reporting a restore that did not restore the core.
+        die "snapshot ${snap} has no binary; refusing a full restore"
+        return 1
     else
         log_warn "snapshot has no binary; skipping binary restore."
     fi
@@ -391,16 +404,20 @@ snapshot_restore() {
             log_info "restored config from ${snap}"
         fi
         if [[ -f "${snap}/xray.service" ]]; then
-            cp -a "${snap}/xray.service" "${XRAY_UNIT_DIR}/xray.service" 2>/dev/null || true
+            cp -a "${snap}/xray.service" "${XRAY_UNIT_DIR}/xray.service" \
+                || { die "restore: failed to restore xray.service"; return 1; }
         fi
         if [[ -f "${snap}/xray@.service" ]]; then
-            cp -a "${snap}/xray@.service" "${XRAY_UNIT_DIR}/xray@.service" 2>/dev/null || true
+            cp -a "${snap}/xray@.service" "${XRAY_UNIT_DIR}/xray@.service" \
+                || { die "restore: failed to restore xray@.service"; return 1; }
         fi
         if [[ -d "${snap}/xray.service.d" ]]; then
-            cp -a "${snap}/xray.service.d" "${XRAY_UNIT_DIR}/xray.service.d" 2>/dev/null || true
+            cp -a "${snap}/xray.service.d" "${XRAY_UNIT_DIR}/xray.service.d" \
+                || { die "restore: failed to restore xray.service.d"; return 1; }
         fi
         if [[ -d "${snap}/share-xray" ]]; then
-            cp -a --remove-destination "${snap}/share-xray/." "${XRAY_SHARE_DIR}/" 2>/dev/null || true
+            cp -a --remove-destination "${snap}/share-xray/." "${XRAY_SHARE_DIR}/" \
+                || { die "restore: failed to restore geodata"; return 1; }
         fi
         if [[ -f "${snap}/node.params" ]]; then
             mkdir -p "$(dirname "${NODE_PARAMS_FILE}")" || { die "restore: cannot create state dir"; return 1; }

@@ -627,6 +627,9 @@ node_setup() {
         confirm "Impact: a new node config will be written to ${XRAY_CONF} and the service will start." || { log_info "node setup cancelled."; return 1; }
     fi
     mkdir -p "${XRAY_CONF_DIR}" || { die "cannot create config dir"; return 1; }
+    # Do not leave a world-traversable dir holding a private key until the
+    # later migrate_permissions pass: 750 right away (group fixed by migrate).
+    chmod 750 "${XRAY_CONF_DIR}" || { die "cannot set 0750 on config dir"; return 1; }
     render_config "${uuid}" "${shortid}" "${priv}" "${sni}" "${port}" "${flow}" "${dest}" "${XRAY_CONF}" || return 1
     write_node_params "${uuid}" "${priv}" "${pub}" "${shortid}" "${host}" "${port}" "${sni}" "${dest}" "${flow}" || return 1
     config_test "${XRAY_CONF}" || return 1

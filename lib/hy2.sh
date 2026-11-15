@@ -158,7 +158,7 @@ hy2_detect_arch() {
 # ---------------------------------------------------------- snapshot ----
 # HY2 snapshots live in their own namespace and never mix with xray ones.
 hy2_snapshot_create() {
-    local stamp ver dir suffix=1 sha_bin sha_conf bin_sha_now
+    local stamp ver dir suffix=1 sha_bin sha_conf sha_cert sha_key sha_unit bin_sha_now
     stamp="$(date +%Y%m%d-%H%M%S)"
     ver="$(hy2_version_installed)"
     dir="${HY2_SNAPSHOT_PARENT}/${HY2_SNAPSHOT_PREFIX}${stamp}-${ver}"
@@ -188,14 +188,20 @@ hy2_snapshot_create() {
     [[ -f "${HY2_KEY}" ]]   && cp -a "${HY2_KEY}"   "${dir}/key.pem"      2>/dev/null || true
     [[ -f "${HY2_UNIT}" ]]  && cp -a "${HY2_UNIT}"  "${dir}/${HY2_SERVICE}.service" 2>/dev/null || true
     [[ -f "${HY2_MARKER}" ]] && cp -a "${HY2_MARKER}" "${dir}/marker"     2>/dev/null || true
-    sha_bin="none"; sha_conf="none"
+    sha_bin="none"; sha_conf="none"; sha_cert="none"; sha_key="none"; sha_unit="none"
     [[ -f "${dir}/hysteria.bin" ]] && sha_bin="$(sha256sum "${dir}/hysteria.bin" | cut -d' ' -f1)"
     [[ -f "${dir}/config.yaml" ]] && sha_conf="$(sha256sum "${dir}/config.yaml" | cut -d' ' -f1)"
+    [[ -f "${dir}/cert.pem" ]] && sha_cert="$(sha256sum "${dir}/cert.pem" | cut -d' ' -f1)"
+    [[ -f "${dir}/key.pem" ]] && sha_key="$(sha256sum "${dir}/key.pem" | cut -d' ' -f1)"
+    [[ -f "${dir}/${HY2_SERVICE}.service" ]] && sha_unit="$(sha256sum "${dir}/${HY2_SERVICE}.service" | cut -d' ' -f1)"
     {
         printf 'version=%s\n' "${ver}"
         printf 'created=%s\n' "${stamp}"
         printf 'binary_sha256=%s\n' "${sha_bin}"
         printf 'config_sha256=%s\n' "${sha_conf}"
+        printf 'cert_sha256=%s\n' "${sha_cert}"
+        printf 'key_sha256=%s\n' "${sha_key}"
+        printf 'unit_sha256=%s\n' "${sha_unit}"
     } > "${dir}/meta.txt"
     chmod 700 "${dir}" 2>/dev/null || true
     chmod 600 "${dir}"/* 2>/dev/null || true
@@ -262,7 +268,7 @@ hy2_snapshot_meta_value() {
     awk -F= -v k="${key}" '$1==k{print $2; exit}' "${dir}/meta.txt" 2>/dev/null | tr -d '\r'
 }
 
-# hy2_listening: 0 when HY2's UDP port is actually bound. `systemctl
+# hy2_listening: 0 when HY2's UDP port is bound BY HYSTERIA. `systemctl
 # is-active` alone is not enough: a process can report active a moment before
 # it binds, and a restore must not be called verified while nothing listens.
 # Test mode uses XRAY_TEST_HY2_LISTENING (default 1 = listening).
@@ -271,7 +277,45 @@ hy2_listening() {
         [[ "${XRAY_TEST_HY2_LISTENING:-1}" == "1" ]]
         return
     fi
-    ss -ulpn 2>/dev/null | grep -qE "[:.]${HY2_PORT}[[:space:]]"
+    # "someone holds UDP 443" is not enough: a dead HY2 with another process on
+    # the port would otherwise be reported as "restored and verified". Require
+    # the listening socket to belong to the hysteria process.
+    ss -ulpn 2>/dev/null | grep -E "[:.]${HY2_PORT}[[:space:]]" \
+        | grep -q "\"${HY2_PROC_NAME:-hysteria}\""
+}
+
+# _hy2_verify_snapshot_file <dir> <file> <meta-key>: verify one optional
+# snapshot payload file against its recorded digest. A recorded hash with a
+# missing or mismatching file fails closed; a file without a recorded hash is
+# a pre-1.4.7 snapshot and is accepted with a warning.
+_hy2_verify_snapshot_file() {
+    local dir="$1" file="$2" key="$3" meta_val actual
+    meta_val="$(hy2_snapshot_meta_value "${dir}" "${key}")"
+    if [[ -n "${meta_val}" && "${meta_val}" != "none" ]]; then
+        if [[ ! -f "${dir}/${file}" ]]; then
+            log_error "HY2 快照 meta.txt 记录了 ${file} 但文件缺失，拒绝恢复: ${dir}"
+            return 1
+        fi
+        actual="$(sha256sum "${dir}/${file}" | cut -d' ' -f1)"
+        if [[ "${actual}" != "${meta_val}" ]]; then
+            log_error "HY2 快照 ${file} SHA256 不符，拒绝恢复: ${dir}"
+            return 1
+        fi
+        return 0
+    fi
+    if [[ "${meta_val}" == "none" ]]; then
+        # The snapshot recorded "not captured": a file appearing now is not
+        # part of that snapshot and must not be restored silently.
+        if [[ -f "${dir}/${file}" ]]; then
+            log_error "HY2 快照 meta.txt 标记 ${file} 未捕获但文件存在，拒绝恢复: ${dir}"
+            return 1
+        fi
+        return 0
+    fi
+    if [[ -f "${dir}/${file}" ]]; then
+        log_warn "HY2 快照 ${dir} 的 ${file} 没有记录哈希（旧快照），将不校验地恢复。"
+    fi
+    return 0
 }
 
 # hy2_snapshot_verify_meta <dir>: verify a HY2 snapshot payload against its
@@ -306,6 +350,9 @@ hy2_snapshot_verify_meta() {
         log_error "HY2 快照 meta.txt 记录了二进制但 hysteria.bin 缺失，拒绝恢复: ${dir}"
         return 1
     fi
+    _hy2_verify_snapshot_file "${dir}" "cert.pem" "cert_sha256" || return 1
+    _hy2_verify_snapshot_file "${dir}" "key.pem" "key_sha256" || return 1
+    _hy2_verify_snapshot_file "${dir}" "${HY2_SERVICE}.service" "unit_sha256" || return 1
     if [[ -f "${dir}/config.yaml" ]]; then
         if [[ "${c_meta}" == "none" ]]; then
             log_error "HY2 快照有配置但 meta.txt 没记录哈希，拒绝恢复: ${dir}"

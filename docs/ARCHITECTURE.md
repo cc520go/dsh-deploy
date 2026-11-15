@@ -41,7 +41,10 @@
 ## 快照与回滚
 
 - Xray 快照在 `/root/xray-backup-<时间>-<核心版本>/`，HY2 在 `/root/hy2-backup-…`。
-- 每个快照写 `meta.txt`，记录 `version`、`binary_sha256`、`config_sha256`。
+- 每个快照写 `meta.txt`，记录 `version`、`binary_sha256`、`config_sha256`、
+  `params_sha256`（node.params）、`units_sha256`（systemd unit 树）和
+  `geodata_sha256`（geodata 树）。恢复前逐项校验；1.4.5 之前的旧快照缺
+  params/units/geodata 摘要时打警告，仍可恢复。
 - 同一 `binary_sha256` 的后续快照**硬链接旧快照的二进制**，不再复制 35MB/24MB；运行中的文件永远不参与链接。
 - 恢复时先 unlink 目标再拷贝（`cp --remove-destination` / `install`），保证不会写穿共享 inode。
 - Xray 默认保留 3 个快照 + 1 个 known-good；HY2 保留 5 个。

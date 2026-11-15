@@ -109,7 +109,14 @@ render_config() {
     if [[ "${flow}" == "vision" ]]; then
         flow_line=', "flow": "xtls-rprx-vision"'
     fi
-    cat > "${outfile}" <<EOF
+    # The config carries the Reality PRIVATE KEY. It must never touch disk
+    # with the default umask mode (0644): write it 0600 in the target dir,
+    # verify the write, then rename into place atomically. A failed write
+    # must fail here instead of leaving a truncated config behind as success.
+    local tmpfile="${outfile}.tmp.$$" old_umask
+    old_umask="$(umask)"
+    umask 077
+    if ! cat > "${tmpfile}" <<EOF
 {
   "log": {
     "loglevel": "warning",
@@ -154,6 +161,23 @@ render_config() {
   ]
 }
 EOF
+    then
+        umask "${old_umask}"
+        rm -f -- "${tmpfile}" 2>/dev/null || true
+        die "render_config: failed to write ${tmpfile} (disk full or permission denied)"
+        return 1
+    fi
+    umask "${old_umask}"
+    chmod 600 "${tmpfile}" || {
+        rm -f -- "${tmpfile}" 2>/dev/null || true
+        die "render_config: cannot set 0600 on ${tmpfile}"
+        return 1
+    }
+    mv -f -- "${tmpfile}" "${outfile}" || {
+        rm -f -- "${tmpfile}" 2>/dev/null || true
+        die "render_config: cannot move config into place: ${outfile}"
+        return 1
+    }
     return 0
 }
 

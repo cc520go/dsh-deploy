@@ -714,8 +714,13 @@ t_upgrade_rollback() {
         printf '%s' "${fakezip}"
     }
     export FAKE_TARGET_VERSION="26.10.21"
+    # A real node has params (the port is needed to verify a rollback).
+    export XRAY_TEST_LISTEN_PORTS="443"
     render_config "PLACEHOLDER-UUID" "PLACEHOLDER-SID" "PLACEHOLDER-PRIVATE-KEY" \
         "sni.example" "443" "vision" "www.apple.com:443" "${XRAY_CONF}" || return 1
+    write_node_params "PLACEHOLDER-UUID" "TESTPRIVKEYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" \
+        "TESTPUBKEYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" "aabbccdd" \
+        "203.0.113.9" "443" "sni.example" "www.apple.com:443" "vision" || return 1
     [[ "$(current_version)" == "26.3.27" ]] || return 1
     local before
     before="$(snapshot_list | wc -l)"
@@ -1551,9 +1556,13 @@ t_snapshot_binary_reuse() {
 t_diag_restore_offer() {
     # shellcheck disable=SC1091
     source "${REPO_ROOT}/diagnose.sh"
-    # Setup: a valid config plus one snapshot.
+    # Setup: a valid config + params + one snapshot.
+    export XRAY_TEST_LISTEN_PORTS="443"
     render_config "PLACEHOLDER-UUID" "PLACEHOLDER-SID" "PLACEHOLDER-PRIVATE-KEY" \
         "sni.example" "443" "vision" "www.apple.com:443" "${XRAY_CONF}" || return 1
+    write_node_params "PLACEHOLDER-UUID" "TESTPRIVKEYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" \
+        "TESTPUBKEYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" "aabbccdd" \
+        "203.0.113.9" "443" "sni.example" "www.apple.com:443" "vision" || return 1
     local snap out
     snap="$(snapshot_create)" || return 1
     # No-snapshot case: prints the fact, does not restore anything.
@@ -2083,6 +2092,23 @@ t_hy2_snapshot_restore_verified() {
     printf '%s' "${out}" | grep -q '未监听' || return 1
     export XRAY_TEST_HY2_LISTENING=1
 
+    # 3c) cert/key/unit are covered too: a tampered cert must be refused.
+    echo cert > "${HY2_CERT}"
+    echo key > "${HY2_KEY}"
+    echo "# unit" > "${HY2_UNIT}"
+    snap="$(hy2_snapshot_create 2>/dev/null)" || return 1
+    grep -qE '^cert_sha256=[0-9a-f]{64}$' "${snap}/meta.txt" || return 1
+    grep -qE '^key_sha256=[0-9a-f]{64}$' "${snap}/meta.txt" || return 1
+    grep -qE '^unit_sha256=[0-9a-f]{64}$' "${snap}/meta.txt" || return 1
+    echo tampered >> "${snap}/cert.pem"
+    expect_fail hy2_snapshot_restore "${snap}" || return 1
+    snap="$(hy2_snapshot_create 2>/dev/null)" || return 1
+    echo tampered >> "${snap}/${HY2_SERVICE}.service"
+    expect_fail hy2_snapshot_restore "${snap}" || return 1
+
+    # Fresh, intact snapshot for the remaining checks.
+    snap="$(hy2_snapshot_create 2>/dev/null)" || return 1
+
     # 4) Service does not come back: the restore must fail, not claim success.
     printf 'listen: :443\npassword: CHANGED-AGAIN\n' > "${HY2_CONF}"
     export XRAY_TEST_HY2_SERVICE_STATE=inactive
@@ -2332,12 +2358,26 @@ t_snapshot_units_geodata() {
     printf 'tampered\n' >> "${snap}/share-xray/geoip.dat"
     expect_fail snapshot_restore "${snap}" full || return 1
 
-    # Legacy snapshots (no digest lines) stay restorable, with a warning.
+    # Removing only ONE digest line must not disable the OTHER check.
+    snap="$(snapshot_create)" || return 1
+    printf '# tampered\n' >> "${snap}/xray.service"
+    grep -vE '^geodata_sha256=' "${snap}/meta.txt" > "${snap}/meta.new"
+    mv "${snap}/meta.new" "${snap}/meta.txt"
+    expect_fail snapshot_restore "${snap}" full || return 1
+
+    # Legacy snapshots (no digest lines at all) stay restorable, with warnings.
     snap="$(snapshot_create)" || return 1
     grep -vE '^(units|geodata)_sha256=' "${snap}/meta.txt" > "${snap}/meta.new"
     mv "${snap}/meta.new" "${snap}/meta.txt"
     out="$(snapshot_restore "${snap}" full 2>&1)" || return 1
-    printf '%s' "${out}" | grep -q 'predates units/geodata' || return 1
+    printf '%s' "${out}" | grep -q 'no units_sha256' || return 1
+    printf '%s' "${out}" | grep -q 'no geodata_sha256' || return 1
+
+    # A full restore of a snapshot without a binary must fail, not warn.
+    snap="$(snapshot_create)" || return 1
+    rm -f "${snap}/xray.bin"
+    printf 'binary_sha256=none\n' >> "${snap}/meta.txt"
+    expect_fail snapshot_restore "${snap}" full || return 1
     SNAPSHOT_PARENT="${saved_parent}"
     return 0
 }
@@ -2361,6 +2401,109 @@ t_bbr_status_semantics() {
     printf '%s' "${out}" | grep -q 'runtime        : ACTIVE' || return 1
     printf '%s' "${out}" | grep -q 'persist        : PRESENT' || return 1
     printf '%s' "${out}" | grep -q 'effective and persisted' || return 1
+    return 0
+}
+
+
+t_render_config_perms() {
+    # The config holds the Reality private key: it must be 0600 from the
+    # moment it hits disk (not only after a later migrate_permissions), and a
+    # failed write must fail instead of leaving a truncated config.
+    source "${REPO_ROOT}/lib/node.sh"
+    local d="${SANDBOX}/render-perms"
+    mkdir -p "${d}"
+    render_config "PLACEHOLDER-UUID" "PLACEHOLDER-SID" "PLACEHOLDER-PRIVATE-KEY" \
+        "sni.example" "443" "vision" "www.apple.com:443" "${d}/config.json" || return 1
+    [[ "$(stat -c '%a' "${d}/config.json")" == "600" ]] || return 1
+    grep -q '"inbounds"' "${d}/config.json" || return 1
+    # Unwritable target: must fail, and must not leave a temp file behind.
+    expect_fail render_config "PLACEHOLDER-UUID" "PLACEHOLDER-SID" "PLACEHOLDER-PRIVATE-KEY" \
+        "sni.example" "443" "vision" "www.apple.com:443" "${d}/missing/config.json" || return 1
+    local leftovers
+    leftovers="$(find "${d}" -name '*.tmp.*' | wc -l)"
+    [[ "${leftovers}" -eq 0 ]] || return 1
+    return 0
+}
+
+t_installer_pin_gate() {
+    # XRAY_INSTALLER_SHA256 is a TEST override: in production the pinned hash
+    # must win, or an env var could disable the installer hash check.
+    # shellcheck disable=SC1091
+    source "${REPO_ROOT}/lib/download.sh"
+    local saved out
+    saved="$(installer_pinned_hash)"
+    [[ "${saved}" == "${INSTALLER_PINNED_SHA256}" ]] || return 1
+    out="$(XRAY_INSTALLER_SHA256=deadbeef installer_pinned_hash)"
+    [[ "${out}" == "deadbeef" ]] || return 1
+    out="$(env -u XRAY_TEST_MODE XRAY_INSTALLER_SHA256=deadbeef bash -c "source '${REPO_ROOT}/lib/download.sh'; installer_pinned_hash" 2>/dev/null)"
+    [[ "${out}" == "${INSTALLER_PINNED_SHA256}" ]] || return 1
+    return 0
+}
+
+t_perm_binary_audit() {
+    # The header promises "binary 755 root:root"; the audit now really checks
+    # it, and migrate repairs it.
+    # shellcheck disable=SC1091
+    source "${REPO_ROOT}/lib/perm.sh"
+    chmod 644 "${XRAY_BIN}"
+    expect_fail validate_permissions || return 1
+    migrate_permissions >/dev/null 2>&1 || return 1
+    [[ "$(stat -c '%a' "${XRAY_BIN}")" == "755" ]] || return 1
+    validate_permissions >/dev/null 2>&1 || return 1
+    return 0
+}
+
+t_diagnose_uses_node_port() {
+    # A node on a non-default port must be diagnosed on THAT port: the
+    # loopback client config used to hard-code 443 and report a healthy node
+    # as FAILED.
+    # shellcheck disable=SC1091
+    source "${REPO_ROOT}/diagnose.sh"
+    local cfg="${SANDBOX}/loopback-8443.json"
+    build_loopback_client_config "${cfg}" "PLACEHOLDER-UUID" "sni.example" \
+        "TESTPUBKEYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" "aabbccdd" "vision" 20001 8443 || return 1
+    grep -q '"port": 8443' "${cfg}" || return 1
+    grep -q '"port": 443' "${cfg}" && return 1
+    # The source must not hard-code the node port anywhere.
+    grep -q '"port": 443, "users"' "${REPO_ROOT}/diagnose.sh" && return 1
+    return 0
+}
+
+t_upgrade_requires_listening() {
+    # systemctl restart returns 0 for a Type=simple unit even if the process
+    # dies immediately: an upgrade must not claim success unless the node port
+    # actually listens.
+    source "${REPO_ROOT}/lib/service.sh"
+    download_core() {
+        local destdir="$3" fakezip
+        fakezip="${destdir}/Xray-linux-64.zip"
+        printf 'fake-zip' > "${fakezip}"
+        printf 'fake-dgst' > "${fakezip}.dgst"
+        printf '%s' "${fakezip}"
+    }
+    local target="26.10.21"
+    # Earlier tests may have left the fake core on this version already.
+    [[ "$(current_version)" == "${target}" ]] && target="26.3.27"
+    export FAKE_TARGET_VERSION="${target}" XRAY_TEST_LISTEN_PORTS="443"
+    render_config "PLACEHOLDER-UUID" "PLACEHOLDER-SID" "PLACEHOLDER-PRIVATE-KEY" \
+        "sni.example" "443" "vision" "www.apple.com:443" "${XRAY_CONF}" || return 1
+    write_node_params "PLACEHOLDER-UUID" "TESTPRIVKEYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" \
+        "TESTPUBKEYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" "aabbccdd" \
+        "203.0.113.9" "443" "sni.example" "www.apple.com:443" "vision" || return 1
+    export XRAY_TEST_LISTEN_PORTS=""
+    local out rc
+    out="$(upgrade_core "${target}" "${SANDBOX}/fake-installer.sh" 2>&1)" && rc=0 || rc=$?
+    export XRAY_TEST_LISTEN_PORTS="443"
+    [[ "${rc}" -ne 0 ]] || return 1
+    printf '%s' "${out}" | grep -q 'not listening' || return 1
+    if printf '%s' "${out}" | grep -q 'upgrade complete'; then return 1; fi
+    return 0
+}
+
+t_uninstall_args() {
+    # --yes/--purge exist so a scripted SSH call does not hang on confirm().
+    source "${REPO_ROOT}/manage.sh"
+    expect_fail cmd_uninstall --bogus || return 1
     return 0
 }
 
@@ -2428,6 +2571,12 @@ run_test t_build_reproducible_flags
 run_test t_smoke_reality_only
 run_test t_snapshot_units_geodata
 run_test t_bbr_status_semantics
+run_test t_render_config_perms
+run_test t_installer_pin_gate
+run_test t_perm_binary_audit
+run_test t_diagnose_uses_node_port
+run_test t_upgrade_requires_listening
+run_test t_uninstall_args
 run_test t_hy2_snapshot_restore_verified
 run_test t_hy2_rollback_honest_failure
 run_test t_snapshot_params_roundtrip

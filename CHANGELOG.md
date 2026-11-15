@@ -2,6 +2,60 @@
 
 记录 DSH 脚本自身的版本；Xray 核心版本见 `VERSION`。
 
+## 1.4.7 — 2026-11-16
+
+基线：1.4.6。按 1.4.6 闭环审查的 13 条修复 + 卸载非交互开关。
+
+### 修复（P1）
+
+- **Reality 私钥不再以 0644 落盘**：`render_config` 现在在目标目录里以
+  umask 077 写临时文件、校验写入、`chmod 600` 后原子 `mv` 到位；写入失败
+  （磁盘满/权限）直接报错，不再留下截断配置当成功。安装流程在 `mkdir` 之后
+  立刻把配置目录设为 750，不再等后面的 `migrate_permissions`。
+- **回滚“已验证”有了实义**：`snapshot_restore` 对 units/geodata 的复制由
+  `|| true` 改为硬失败，full 模式缺 binary 直接拒绝；新增
+  `verify_restored_state`，回滚后要比对“恢复的版本 == 快照记录的版本”，
+  并确认节点端口在监听，才允许打印 “restored and verified”。
+- **升级成功必须端口在听**：`upgrade_core` 在版本校验后调用
+  `wait_for_listening`；`Type=simple` 进程启动即崩时不再报 “upgrade complete”，
+  而是回滚并明确失败。
+
+### 修复（P2）
+
+- `daemon-reload` 失败由警告改为硬失败（旧 unit 不能继续当成功）。
+- `XRAY_INSTALLER_SHA256` 改为经 `test_override` 门控：生产环境忽略并告警，
+  环境变量不能再关闭安装器哈希校验。
+- 权限审计真的检查 binary：`migrate_permissions` 设 755 root:root，
+  `validate_permissions` 校验模式与属主（头注释与实际一致了）。
+- 诊断不再硬编码 443：回环客户端与端口检查都读 `node.params` 的 port，
+  非 443 端口安装不会被误判 FAIL。
+- 快照 units/geodata 摘要改为各自独立校验：删掉一行不再能同时绕过两项。
+- HY2 监听校验要求端口属于 `hysteria` 进程，别的进程占着 UDP 443 不会
+  再被当成“已恢复并验证”。
+- HY2 快照补 `cert_sha256` / `key_sha256` / `unit_sha256`，被改过的证书、
+  私钥或 unit 拒绝恢复。
+- 卸载失败即失败：HY2 未卸净、sysctl/logrotate 删不掉、`rm` 失败都会让
+  `DSH uninstall` 返回非 0 并打印 `uninstall INCOMPLETE`，不再一律
+  “uninstall complete”。
+- 文档同步：`docs/ARCHITECTURE.md` 的快照 meta 字段补全。
+- CI 依赖钉到 commit SHA：`actions/checkout`、`actions/upload-artifact`、
+  `softprops/action-gh-release` 不再跟主版本浮标。
+
+### 新增
+
+- **`DSH uninstall --yes [--purge]`**：非交互 SSH 下不再挂在确认提示上；
+  `--yes` 跳过确认、`--purge` 同时删状态目录。
+
+### 测试
+
+- 本机：84 passed / 0 failed / 1 skipped。
+- 新增回归：`t_render_config_perms`、`t_installer_pin_gate`、
+  `t_perm_binary_audit`、`t_diagnose_uses_node_port`、
+  `t_upgrade_requires_listening`、`t_uninstall_args`，并扩展了
+  `t_snapshot_units_geodata`（单行缺失绕过）与 HY2 快照用例
+  （cert/key/unit 篡改）。
+- 真机：见下方验证记录。
+
 ## 1.4.6 — 2026-11-15
 
 基线：1.4.5。修 1.4.5 真机复核发现的一个测试/检测问题。

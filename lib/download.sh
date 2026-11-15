@@ -179,6 +179,19 @@ download_core() {
     return 0
 }
 
+# installer_pinned_hash: prints the SHA-256 the downloaded installer must
+# match. XRAY_INSTALLER_SHA256 exists for tests only and goes through
+# test_override like every other XRAY_TEST_* variable: in production it is
+# ignored (with a warning), so an env var cannot disable the pin.
+installer_pinned_hash() {
+    local override
+    if override="$(test_override XRAY_INSTALLER_SHA256)"; then
+        printf '%s' "${override}"
+        return 0
+    fi
+    printf '%s' "${INSTALLER_PINNED_SHA256}"
+}
+
 # fetch_installer <dest>: downloads the official installer over TLS and
 # sanity-checks it (non-trivial size + marker strings). This is TLS +
 # sanity, NOT signature verification — the installer has no published
@@ -200,7 +213,7 @@ fetch_installer() {
     elif [[ "${INSTALLER_PINNED_COMMIT}" != "PLACEHOLDER" ]]; then
         url="https://github.com/XTLS/Xray-install/raw/${INSTALLER_PINNED_COMMIT}/install-release.sh"
     fi
-    pinned_hash="${XRAY_INSTALLER_SHA256:-${INSTALLER_PINNED_SHA256}}"
+    pinned_hash="$(installer_pinned_hash)"
     log_info "downloading official installer ..."
     download_file "${url}" "${dest}" || return 1
     size="$(wc -c < "${dest}" | tr -d ' ')"
