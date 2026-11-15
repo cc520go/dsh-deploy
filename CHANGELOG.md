@@ -2,6 +2,79 @@
 
 记录 DSH 脚本自身的版本；Xray 核心版本见 `VERSION`。
 
+## 1.4.3 — 2026-11-15
+
+基线：1.4.2（`f997a92`）。本版只修 1.4.2 全量复审发现的问题，不新增功能。
+
+### 修复（P0/P1）
+
+- **HY2 恢复不再谎报成功**：`hy2_snapshot_restore` 恢复前校验 `meta.txt` 的
+  `binary_sha256` / `config_sha256`，缺失、损坏、不符一律拒绝恢复；恢复后
+  校验服务状态，服务没起来就返回非 0。升级、轮换证书、改伪装域名、菜单恢复
+  的 8 处调用改用 `hy2_rollback_after_failure`，失败时明确输出
+  `HY2 ROLLBACK FAILED` / “HY2 节点可能仍是坏的”，不再打“已从快照恢复”。
+- **快照包含 node.params**：`snapshot_create` 一起备份 `node.params`，
+  `meta.txt` 记录 `params_sha256`，`snapshot_restore full` 一起还原并校验。
+  1.4.2 的菜单回滚只还原配置不还原参数，会导致分享链接和实际配置脱节。
+  1.4.3 之前的旧快照仍可恢复（meta 无 params 行时打警告）。
+- **sshd 认证回滚不再吞错**：`cmd_auth_rollback` 与菜单 1 的恢复分支改用
+  `_sshd_restore_all`，备份缺失或复制失败返回非 0 并输出错误；恢复后重跑
+  `sshd -t`，失败同样上报，状态记为 `rolled_back_failed`，下次进菜单 1 会提示。
+- **10 分钟回滚定时器失败即报错**：`auth_timer_start` 在状态文件写失败、
+  `systemd-run` 缺失或失败时返回非 0，并提示“自动回滚不可用，需手动
+  `DSH auth-rollback`”，调用点按失败处理，不再静默降级。
+- **公开仓库/发布包不再泄露 live 服务器信息**：`docs/TODO.md` 删掉 IP、
+  SSH 端口和“给我密码”一类表述（`docs/` 会进 tarball）。
+- **smoke-remote.sh 进签名清单**：`SHA256SUMS` 现在覆盖体检脚本，之前它是
+  Release 里唯一不受校验的资产。
+
+### 改进
+
+- **构建可复现**：`tools/build-release.sh` 用
+  `tar --sort=name --mtime=@SOURCE_DATE_EPOCH --owner=0 --group=0 --numeric-owner`
+  加 `gzip -n`，同一提交两次构建哈希一致。
+- **下载不再无限期挂住**：`download_file` 的 curl 加
+  `--connect-timeout/--max-time`，wget 加超时重试；GitHub API 查询同样加超时。
+- **版本号不再硬编码**：查询 Xray 最新版的 User-Agent 改用
+  `dsh_release_version`（原来写死 `DSH/1.1`）；`t_release_identity` 现在也查
+  代号、横幅插值和残留的 `DSH/1.x` User-Agent。
+- **摘要要求放宽到安全相关项**：`.dgst` 只强制 `SHA256`/`SHA512`；MD5/SHA1
+  存在就校验，缺失不再让安装硬失败。
+- **测试套件不再依赖宿主 systemd**：测试模式下 `env_check` 不再要求真实
+  `systemctl`，`t_env_check_debian12` / `t_install_completion` 在任何环境都能跑
+  （CI 不用再 `SKIP_ENV_TESTS=1` 遮蔽它们）。
+- **端口 443 检查失败关闭**：没有 `ss` 时不再静默放行，而是报错让用户装
+  iproute2。
+- **双栈机 IP 检测**：`fetch_one_ip` 加 `-4`，第三路源改用
+  `ipv4.icanhazip.com`，修掉 686 双栈机只拿到一个有效源、被标“未验证”的 bug。
+- **诊断环回不再误判**：本机没有出网时，环回 Reality 测试报 SKIP 而不是 FAIL。
+- **硬链接复用复核哈希**：`snapshot_link_previous` 链接后校验文件哈希，避免把
+  旧快照里的损坏文件带进新快照。
+- **HY2 增加 known-good**：`hy2_snapshot_prune` 跳过标记为 known-good 的快照，
+  安装/恢复验证通过后标记，避免最后一张好快照被新快照顶掉。
+- **菜单文案**：菜单 7 明确写“新 Reality SNI（会同时改 dest）”，菜单 20 注释
+  的编号改对。
+- **CI**：权限按作业分配（测试作业 `contents/statuses: write`，复验作业只读）；
+  shellcheck 提升到 warning 级；新增 `verify-release` 作业，每次 push 都从
+  Release 下载全部资产、验签并逐个对哈希。
+- 删除死配置 `XRAY_INSTALLER_URL`（总是被镜像/钉死提交覆盖，改了也没用）。
+
+### 不在本版范围（如实说明）
+
+- HY2 配置测试仍是“前台跑 6 秒 + 日志关键字”，没有真实 QUIC 握手探活
+  （需要 hysteria 客户端二进制，测试要联网下载，会破坏沙盒封闭性）。
+- `snapshot_verify_meta` 仍只校验 binary/config/params，units 与 geodata
+  没有纳入哈希。
+- 云电脑脚本（`cloudpc-setup.sh`）仍未重写，按原计划另开分支。
+
+### 测试
+
+- 本机：74 passed, 0 failed, 1 skipped（缺 `zip` 的 `t_archive_xray`）。
+- 新增回归：`t_hy2_snapshot_restore_verified`、`t_hy2_rollback_honest_failure`、
+  `t_snapshot_params_roundtrip`、`t_snapshot_legacy_meta`、
+  `t_auth_rollback_honest_failure`、`t_auth_timer_fail_closed`。
+- `shellcheck -S warning` 全树干净；`bash -n` 全部通过。
+
 ## 1.4.2 — 2026-11-15
 
 ### 修复

@@ -1,8 +1,9 @@
 name: CI
 
-# 目标：每次 push 都跑一遍"能不能装"的三道关 —— 语法、静态检查、测试套件。
-# 测试里有几项强绑 Debian 12（内核/系统检查），所以整条流水线跑在
-# debian:12 容器里，而不是 ubuntu runner，否则永远是红的、然后就没人看了。
+# 目标：每次 push 都跑一遍"能不能装、发的东西还对不对"的三道关 —— 语法、
+# 静态检查、测试套件，外加一次对线上 Release 的签名/哈希复验。
+# 测试里有几项强绑 Debian 12（内核/系统检查），所以作业跑在 debian:12 容器里，
+# 而不是 ubuntu runner，否则永远是红的、然后就没人看了。
 
 on:
   push:
@@ -10,15 +11,16 @@ on:
   pull_request:
   workflow_dispatch:
 
-permissions:
-  contents: write
-  statuses: write
-
+# 权限按作业分配：测试作业要回写 ci-log 分支和 commit status，复验作业
+# 只需要读。不给仓库级别的宽权限，原则是最小够用。
 jobs:
   test:
     name: Debian 12 测试与打包
     runs-on: ubuntu-latest
     container: debian:12
+    permissions:
+      contents: write   # 失败时把日志推到 ci-log 分支
+      statuses: write   # 失败时写一条 commit status
     # 容器作业默认用 sh(dash) 跑 run:，但那不是 bash —— 脚本里的
     # ${PIPESTATUS[0]} 之类会直接报 "bad substitution"。全局指定 bash。
     defaults:
@@ -43,13 +45,16 @@ jobs:
           done
           echo "所有脚本语法通过"
 
-      - name: 静态检查（shellcheck，仅 error 级）
+      - name: 静态检查（shellcheck，warning 级）
+        # 1.4.3 起整棵树在 warning 级干净，所以不再只卡 error。
         run: |
-          shellcheck -S error install.sh manage.sh diagnose.sh lib/*.sh tools/*.sh
+          shellcheck -S warning install.sh manage.sh diagnose.sh lib/*.sh tools/*.sh
 
       - name: 测试套件
+        # 1.4.3 起环境类用例在测试模式下不再要求真实 systemctl，
+        # 所以 CI 不再用 SKIP_ENV_TESTS 遮蔽它们（真实 systemd 的
+        # 验收仍由 smoke-remote.sh 负责）。
         env:
-          SKIP_ENV_TESTS: "1"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         # 失败时把失败的用例名写进 commit status：这样不用登录也能
         # 从 /commits/<sha>/status 里看到具体哪几条挂了（日志要权限）。
@@ -98,3 +103,62 @@ jobs:
           name: dist
           path: dist/
           retention-days: 14
+
+  verify-release:
+    name: 复验线上 Release 资产
+    runs-on: ubuntu-latest
+    container: debian:12
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: 安装依赖
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends curl ca-certificates gnupg coreutils
+
+      - name: 下载并按 SHA256SUMS 校验全部资产
+        # 发布链的最后一环：拿线上 Release 的附件，用仓库公钥验签，
+        # 再逐个对哈希。缺资产、被替换、清单漏项都会在这里变红，
+        # 而不是等到用户装到一半才发现。
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          repo="${GITHUB_REPOSITORY}"
+          api="https://api.github.com/repos/${repo}/releases/latest"
+          json="$(curl -fsSL -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" "${api}")"
+          tag="$(printf '%s' "${json}" \
+            | grep -oE '"tag_name"[[:space:]]*:[[:space:]]*"[^"]+"' | head -1 \
+            | sed -E 's/.*"([^"]+)"$/\1/')"
+          if [[ -z "${tag}" ]]; then
+            echo "::error::找不到已发布的 Release"
+            exit 1
+          fi
+          work="$(mktemp -d)"
+          cd "${work}"
+          base="https://github.com/${repo}/releases/download/${tag}"
+          for f in SHA256SUMS SHA256SUMS.asc dsh-signing-key.asc; do
+            curl -fsSL -O "${base}/${f}" || { echo "::error::缺少资产: ${f}"; exit 1; }
+          done
+          export GNUPGHOME="${work}/gnupg"
+          mkdir -p "${GNUPGHOME}"
+          chmod 700 "${GNUPGHOME}"
+          gpg --batch --import dsh-signing-key.asc >/dev/null 2>&1
+          fpr="$(gpg --with-colons --fingerprint 2>/dev/null | awk -F: '/^fpr:/{print $10; exit}')"
+          if [[ "${fpr}" != "8E25C6FC8FA01719137FAAE6BC9AF5236E467872" ]]; then
+            echo "::error::签名公钥指纹不符: ${fpr}"
+            exit 1
+          fi
+          gpg --status-fd 1 --verify SHA256SUMS.asc SHA256SUMS 2>/dev/null \
+            | grep -q '^\[GNUPG:\] GOODSIG' || { echo "::error::SHA256SUMS 签名校验失败"; exit 1; }
+          count=0
+          for f in $(awk '{print $2}' SHA256SUMS); do
+            curl -fsSL -O "${base}/${f}" || { echo "::error::Release 缺资产: ${f}"; exit 1; }
+            count=$((count + 1))
+          done
+          sha256sum -c SHA256SUMS
+          echo "release ${tag}: ${count} 个资产通过签名与哈希复验"

@@ -313,6 +313,10 @@ t_dgst() {
     expect_fail verify_dgst "${f}" "${dg}.nol512" || return 1
     # Missing .dgst file must fail (never warn-and-continue).
     expect_fail verify_dgst "${f}" "${d}/missing.dgst" || return 1
+    # Upstream dropped MD5/SHA1 from some .dgst files: their absence must
+    # NOT break the install (SHA256/SHA512 stay mandatory).
+    grep -vE '^(MD5|SHA1)' "${dg}" > "${dg}.noweak"
+    verify_dgst "${f}" "${dg}.noweak" || return 1
     return 0
 }
 
@@ -1314,6 +1318,16 @@ t_release_identity() {
     grep -q "${cv}" "${REPO_ROOT}/README.md" || return 1
     grep -q "DSH_VERSION" "${REPO_ROOT}/docs/ARCHITECTURE.md" || return 1
     grep -q "${dv}" "${REPO_ROOT}/CHANGELOG.md" || return 1
+    # Codename is part of the user-facing identity too.
+    local codename
+    codename="$(tr -d '[:space:]' < "${REPO_ROOT}/DSH_CODENAME")"
+    grep -q "${codename}" "${REPO_ROOT}/README.md" || return 1
+    # The banner must interpolate the release file, not hard-code a version.
+    grep -q 'DSH %s' "${REPO_ROOT}/manage.sh" || return 1
+    # A stale hard-coded User-Agent shipped for three releases; catch it now.
+    if grep -rn 'DSH/1\.[0-9]' "${REPO_ROOT}/lib" "${REPO_ROOT}/manage.sh" "${REPO_ROOT}/install.sh" 2>/dev/null; then
+        return 1
+    fi
     return 0
 }
 
@@ -2001,6 +2015,215 @@ t_hy2_temp_perms() {
     return 0
 }
 
+# ---- 1.4.3 regression tests -------------------------------------------
+# The three "claims success without verifying" paths fixed in 1.4.3:
+# HY2 snapshot restore, sshd auth rollback, and the 10-minute auth timer.
+# They are written against the failure modes the review found, so a
+# regression re-opens them.
+
+t_hy2_snapshot_restore_verified() {
+    # HY2 restore must verify meta.txt before touching live files, and must
+    # only report success when the service actually comes back. Before 1.4.3
+    # it copied blindly and printed "已从快照恢复" after `start || true`.
+    # shellcheck disable=SC1091
+    source "${REPO_ROOT}/manage.sh"
+    local tmp snap out rc live_before
+    tmp="$(mktemp -d)" || return 1
+    export HY2_BIN="${tmp}/bin/hysteria"
+    export HY2_CONF_DIR="${tmp}/etc/hysteria"
+    export HY2_CONF="${HY2_CONF_DIR}/config.yaml"
+    export HY2_CERT="${HY2_CONF_DIR}/cert.pem"
+    export HY2_KEY="${HY2_CONF_DIR}/key.pem"
+    export HY2_UNIT_DIR="${tmp}/units"
+    export HY2_UNIT="${HY2_UNIT_DIR}/hysteria-server.service"
+    export HY2_MARKER="${HY2_CONF_DIR}/.managed-by-hy2addon"
+    export HY2_SNAPSHOT_PARENT="${tmp}/snapshots"
+    export HY2_USER=root
+    mkdir -p "${HY2_CONF_DIR}" "${HY2_UNIT_DIR}" "${HY2_SNAPSHOT_PARENT}" "${tmp}/bin"
+    printf '#!/usr/bin/env bash\necho v2.0.0\n' > "${HY2_BIN}"
+    chmod 755 "${HY2_BIN}"
+    printf 'listen: :443\npassword: PLACEHOLDER-HY2-PASSWORD\n' > "${HY2_CONF}"
+    : > "${HY2_MARKER}"
+
+    export XRAY_TEST_HY2_SERVICE_STATE=active
+    snap="$(hy2_snapshot_create 2>/dev/null)" || return 1
+    [[ -f "${snap}/meta.txt" ]] || return 1
+    grep -q '^binary_sha256=[0-9a-f]' "${snap}/meta.txt" || return 1
+    grep -q '^config_sha256=[0-9a-f]' "${snap}/meta.txt" || return 1
+
+    # 1) Payload no longer matches meta.txt: refuse, live files untouched.
+    printf '# tampered\n' >> "${snap}/config.yaml"
+    live_before="$(sha256sum "${HY2_CONF}" | cut -d' ' -f1)"
+    out="$(hy2_snapshot_restore "${snap}" 2>&1)" && rc=0 || rc=$?
+    [[ "${rc}" -ne 0 ]] || return 1
+    printf '%s' "${out}" | grep -q 'SHA256 不符' || return 1
+    [[ "$(sha256sum "${HY2_CONF}" | cut -d' ' -f1)" == "${live_before}" ]] || return 1
+
+    # 2) No meta.txt at all: also refused.
+    rm -f "${snap}/meta.txt"
+    expect_fail hy2_snapshot_restore "${snap}" || return 1
+
+    # 3) A good snapshot restores, and the service is verified active.
+    snap="$(hy2_snapshot_create 2>/dev/null)" || return 1
+    printf 'listen: :443\npassword: CHANGED-BY-HAND\n' > "${HY2_CONF}"
+    hy2_snapshot_restore "${snap}" >/dev/null 2>&1 || return 1
+    grep -q 'PLACEHOLDER-HY2-PASSWORD' "${HY2_CONF}" || return 1
+
+    # 4) Service does not come back: the restore must fail, not claim success.
+    printf 'listen: :443\npassword: CHANGED-AGAIN\n' > "${HY2_CONF}"
+    export XRAY_TEST_HY2_SERVICE_STATE=inactive
+    out="$(hy2_snapshot_restore "${snap}" 2>&1)" && rc=0 || rc=$?
+    [[ "${rc}" -ne 0 ]] || return 1
+    printf '%s' "${out}" | grep -q '服务未启动' || return 1
+    printf '%s' "${out}" | grep -q '已从快照恢复并验证' && return 1
+    export XRAY_TEST_HY2_SERVICE_STATE=active
+
+    rm -rf -- "${tmp}"
+    return 0
+}
+
+t_hy2_rollback_honest_failure() {
+    # A failed HY2 change must say ROLLBACK FAILED when the restore cannot be
+    # verified, never "已回滚".
+    # shellcheck disable=SC1091
+    source "${REPO_ROOT}/manage.sh"
+    local tmp snap out rc
+    tmp="$(mktemp -d)" || return 1
+    export HY2_BIN="${tmp}/bin/hysteria"
+    export HY2_CONF_DIR="${tmp}/etc/hysteria"
+    export HY2_CONF="${HY2_CONF_DIR}/config.yaml"
+    export HY2_CERT="${HY2_CONF_DIR}/cert.pem"
+    export HY2_KEY="${HY2_CONF_DIR}/key.pem"
+    export HY2_UNIT_DIR="${tmp}/units"
+    export HY2_UNIT="${HY2_UNIT_DIR}/hysteria-server.service"
+    export HY2_MARKER="${HY2_CONF_DIR}/.managed-by-hy2addon"
+    export HY2_SNAPSHOT_PARENT="${tmp}/snapshots"
+    export HY2_USER=root
+    mkdir -p "${HY2_CONF_DIR}" "${HY2_UNIT_DIR}" "${HY2_SNAPSHOT_PARENT}" "${tmp}/bin"
+    printf '#!/usr/bin/env bash\necho v2.0.0\n' > "${HY2_BIN}"
+    chmod 755 "${HY2_BIN}"
+    printf 'listen: :443\n' > "${HY2_CONF}"
+
+    export XRAY_TEST_HY2_SERVICE_STATE=inactive
+    snap="$(hy2_snapshot_create 2>/dev/null)" || return 1
+    out="$(hy2_rollback_after_failure "${snap}" "测试失败" 2>&1)" && rc=0 || rc=$?
+    [[ "${rc}" -ne 0 ]] || return 1
+    printf '%s' "${out}" | grep -q 'ROLLBACK FAILED' || return 1
+    printf '%s' "${out}" | grep -q '已回滚' && return 1
+
+    # No snapshot at all: say so instead of silently doing nothing.
+    out="$(hy2_rollback_after_failure "" "测试失败" 2>&1)" && rc=0 || rc=$?
+    [[ "${rc}" -ne 0 ]] || return 1
+    printf '%s' "${out}" | grep -q '无法自动回滚' || return 1
+
+    rm -rf -- "${tmp}"
+    return 0
+}
+
+t_snapshot_params_roundtrip() {
+    # A snapshot must carry node.params and restore it with the config; the
+    # 1.4.2 menu rollback restored config.json but left the params behind,
+    # so the share link and the live node disagreed afterwards.
+    # shellcheck disable=SC1091
+    source "${REPO_ROOT}/lib/backup.sh"
+    local d="${SANDBOX}/params-roundtrip" snap saved_parent
+    saved_parent="${SNAPSHOT_PARENT}"
+    mkdir -p "${d}"
+    SNAPSHOT_PARENT="${d}"
+    render_config "PLACEHOLDER-UUID" "PLACEHOLDER-SID" "PLACEHOLDER-PRIVATE-KEY" \
+        "sni.example" "443" "vision" "www.apple.com:443" "${XRAY_CONF}" || return 1
+    write_node_params "PLACEHOLDER-UUID" "TESTPRIVKEYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" \
+        "TESTPUBKEYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" "aabbccdd" \
+        "203.0.113.9" "443" "sni.example" "www.apple.com:443" "vision" || return 1
+    snap="$(snapshot_create)" || return 1
+    [[ -f "${snap}/node.params" ]] || return 1
+    grep -q '^params_sha256=[0-9a-f]' "${snap}/meta.txt" || return 1
+
+    # Diverge the live state, then roll back: both payloads must return.
+    write_node_params "PLACEHOLDER-UUID" "TESTPRIVKEYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" \
+        "TESTPUBKEYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" "aabbccdd" \
+        "203.0.113.77" "8443" "other.example" "other.example:443" "vision" || return 1
+    snapshot_restore "${snap}" full || return 1
+    grep -q '^host=203.0.113.9$' "${NODE_PARAMS_FILE}" || return 1
+    [[ "$(stat -c %a "${NODE_PARAMS_FILE}")" == "600" ]] || return 1
+
+    # A tampered params file is refused like a tampered config.
+    printf 'host=198.51.100.1\n' >> "${snap}/node.params"
+    expect_fail snapshot_restore "${snap}" full || return 1
+    SNAPSHOT_PARENT="${saved_parent}"
+    return 0
+}
+
+t_snapshot_legacy_meta() {
+    # Snapshots written before 1.4.3 have no params_sha256 and no
+    # node.params: they stay restorable (legacy), but a snapshot that HAS
+    # node.params without the matching hash line is refused.
+    # shellcheck disable=SC1091
+    source "${REPO_ROOT}/lib/backup.sh"
+    local d="${SANDBOX}/legacy-meta" snap saved_parent out
+    saved_parent="${SNAPSHOT_PARENT}"
+    mkdir -p "${d}"
+    SNAPSHOT_PARENT="${d}"
+    render_config "PLACEHOLDER-UUID" "PLACEHOLDER-SID" "PLACEHOLDER-PRIVATE-KEY" \
+        "sni.example" "443" "vision" "www.apple.com:443" "${XRAY_CONF}" || return 1
+    snap="$(snapshot_create)" || return 1
+    rm -f "${snap}/node.params"
+    grep -v '^params_sha256=' "${snap}/meta.txt" > "${snap}/meta.txt.new"
+    mv "${snap}/meta.txt.new" "${snap}/meta.txt"
+    out="$(snapshot_restore "${snap}" full 2>&1)" || return 1
+    printf '%s' "${out}" | grep -q 'predates params capture' || return 1
+
+    # params file present but unrecorded -> fail closed.
+    printf 'host=203.0.113.9\n' > "${snap}/node.params"
+    expect_fail snapshot_restore "${snap}" full || return 1
+    SNAPSHOT_PARENT="${saved_parent}"
+    return 0
+}
+
+t_auth_rollback_honest_failure() {
+    # cmd_auth_rollback used `cp ... || true` and always printed success.
+    # A missing backup or a failed copy must return non-zero and say so.
+    # shellcheck disable=SC1091
+    source "${REPO_ROOT}/manage.sh"
+    local tmp out rc
+    tmp="$(mktemp -d)" || return 1
+    export XRAY_TEST_AUTH_STATE="${tmp}/auth.state"
+
+    printf 'pending\nbak_main=%s\nbak_list=\n' "${tmp}/sshd_config.bak-20260101-000000" > "${XRAY_TEST_AUTH_STATE}"
+    out="$(cmd_auth_rollback 2>&1)" && rc=0 || rc=$?
+    [[ "${rc}" -ne 0 ]] || return 1
+    printf '%s' "${out}" | grep -q '恢复 sshd 备份失败' || return 1
+    grep -q '^rolled_back_failed' "${XRAY_TEST_AUTH_STATE}" || return 1
+
+    # Happy path: the original file is restored and the state says rolled_back.
+    printf 'PasswordAuthentication yes\n' > "${tmp}/sshd_config.bak-20260101-000001"
+    printf 'PasswordAuthentication no\n' > "${tmp}/sshd_config"
+    printf 'pending\nbak_main=%s\nbak_list=\n' "${tmp}/sshd_config.bak-20260101-000001" > "${XRAY_TEST_AUTH_STATE}"
+    cmd_auth_rollback >/dev/null 2>&1 || return 1
+    grep -q '^PasswordAuthentication yes$' "${tmp}/sshd_config" || return 1
+    grep -q '^rolled_back$' "${XRAY_TEST_AUTH_STATE}" || return 1
+
+    rm -rf -- "${tmp}"
+    return 0
+}
+
+t_auth_timer_fail_closed() {
+    # If the 10-minute rollback timer cannot be created, the safety net is
+    # gone: auth_timer_start must fail loudly and leave no "pending" state
+    # that would make the next menu 1 look protected.
+    command -v systemd-run >/dev/null 2>&1 && return 77
+    local tmp out rc
+    tmp="$(mktemp -d)" || return 1
+    out="$(env -u XRAY_TEST_MODE DSH_STATE_DIR="${tmp}" \
+        bash -c 'source "'"${REPO_ROOT}"'/manage.sh"; auth_timer_start /tmp/none.bak-20260101-000000 /tmp/none2.bak-20260101-000000' 2>&1)" && rc=0 || rc=$?
+    [[ "${rc}" -ne 0 ]] || return 1
+    printf '%s' "${out}" | grep -q 'no automatic rollback' || return 1
+    [[ -f "${tmp}/auth-rollback.state" ]] && return 1
+    rm -rf -- "${tmp}"
+    return 0
+}
+
+
 run_test t_version
 run_test t_dgst
 run_test t_urlencode
@@ -2060,6 +2283,12 @@ run_test t_hy2_masquerade_url
 run_test t_test_override_production
 run_test t_mirror_protocol
 run_test t_hy2_temp_perms
+run_test t_hy2_snapshot_restore_verified
+run_test t_hy2_rollback_honest_failure
+run_test t_snapshot_params_roundtrip
+run_test t_snapshot_legacy_meta
+run_test t_auth_rollback_honest_failure
+run_test t_auth_timer_fail_closed
 run_test t_node_apply_rollback
 run_test t_snapshot_restore_sha_mismatch
 run_test t_rollback_honest_failure

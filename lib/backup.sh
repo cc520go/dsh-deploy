@@ -54,7 +54,7 @@ current_version() {
 # snapshot_create: takes a snapshot of the current install state and prints
 # the snapshot directory (stdout). Prunes to the newest SNAPSHOT_KEEP.
 snapshot_create() {
-    local stamp ver dir bin_sha conf_sha bin_sha_now suffix=1
+    local stamp ver dir bin_sha conf_sha params_sha bin_sha_now suffix=1
     stamp="$(date +%Y%m%d-%H%M%S)"
     ver="$(current_version)"
     dir="${SNAPSHOT_PARENT}/xray-backup-${stamp}-${ver}"
@@ -89,15 +89,26 @@ snapshot_create() {
     if [[ -d "${XRAY_SHARE_DIR}" ]]; then
         cp -a "${XRAY_SHARE_DIR}" "${dir}/share-xray" 2>/dev/null || true
     fi
+    # node.params is the node identity behind the config (uuid, keys, host,
+    # port, sni). A snapshot without it can restore the config but not the
+    # params, which is how a menu rollback used to leave the share link and
+    # the live config disagreeing. Capture it with the rest of the payload.
+    if [[ -f "${NODE_PARAMS_FILE}" ]]; then
+        cp -a "${NODE_PARAMS_FILE}" "${dir}/node.params" \
+            || { die "snapshot: failed to copy node.params"; return 1; }
+    fi
     bin_sha="none"
     conf_sha="none"
+    params_sha="none"
     [[ -f "${dir}/xray.bin" ]] && bin_sha="$(sha256sum "${dir}/xray.bin" | cut -d' ' -f1)"
     [[ -f "${dir}/config.json" ]] && conf_sha="$(sha256sum "${dir}/config.json" | cut -d' ' -f1)"
+    [[ -f "${dir}/node.params" ]] && params_sha="$(sha256sum "${dir}/node.params" | cut -d' ' -f1)"
     {
         printf 'version=%s\n' "${ver}"
         printf 'created=%s\n' "${stamp}"
         printf 'binary_sha256=%s\n' "${bin_sha}"
         printf 'config_sha256=%s\n' "${conf_sha}"
+        printf 'params_sha256=%s\n' "${params_sha}"
     } > "${dir}/meta.txt"
     chmod 700 "${dir}" || true
     log_info "snapshot created: ${dir} (version ${ver})"
@@ -227,7 +238,7 @@ snapshot_prune() {
 # Missing meta.txt, missing hash fields, a hash/file mismatch, or a file
 # that meta.txt does not record all fail closed (return 1).
 snapshot_verify_meta() {
-    local snap="$1" mode="$2" meta b_meta c_meta actual
+    local snap="$1" mode="$2" meta b_meta c_meta p_meta actual
     meta="${snap}/meta.txt"
     if [[ ! -f "${meta}" ]]; then
         die "snapshot meta.txt missing; refusing to restore ${snap}"
@@ -254,6 +265,28 @@ snapshot_verify_meta() {
         return 1
     fi
     if [[ "${mode}" == "full" ]]; then
+        # node.params belongs to the config: restoring config.json without
+        # it leaves the share link and the live node disagreeing. Snapshots
+        # written before 1.4.3 have no params_sha256 line; those stay
+        # restorable (legacy) but are reported, never silently trusted as
+        # params-bearing.
+        p_meta="$(awk -F= '$1=="params_sha256"{print $2; exit}' "${meta}" | tr -d '\r')"
+        if [[ -f "${snap}/node.params" ]]; then
+            if [[ -z "${p_meta}" || "${p_meta}" == "none" ]]; then
+                die "snapshot has node.params but meta.txt records no params hash; refusing to restore ${snap}"
+                return 1
+            fi
+            actual="$(sha256sum "${snap}/node.params" | cut -d' ' -f1)"
+            if [[ "${actual}" != "${p_meta}" ]]; then
+                die "snapshot node.params SHA256 mismatch; refusing to restore ${snap}"
+                return 1
+            fi
+        elif [[ -n "${p_meta}" && "${p_meta}" != "none" ]]; then
+            die "snapshot meta.txt records node.params but the file is missing; refusing to restore ${snap}"
+            return 1
+        elif [[ -z "${p_meta}" ]]; then
+            log_warn "snapshot ${snap} predates params capture (no params_sha256); node.params will not be restored."
+        fi
         if [[ -f "${snap}/config.json" ]]; then
             if [[ "${c_meta}" == "none" ]]; then
                 die "snapshot has config.json but meta.txt records no config hash; refusing to restore ${snap}"
@@ -318,6 +351,12 @@ snapshot_restore() {
         fi
         if [[ -d "${snap}/share-xray" ]]; then
             cp -a --remove-destination "${snap}/share-xray/." "${XRAY_SHARE_DIR}/" 2>/dev/null || true
+        fi
+        if [[ -f "${snap}/node.params" ]]; then
+            mkdir -p "$(dirname "${NODE_PARAMS_FILE}")" || { die "restore: cannot create state dir"; return 1; }
+            cp -a --remove-destination "${snap}/node.params" "${NODE_PARAMS_FILE}"                 || { die "restore: failed to restore node.params"; return 1; }
+            chmod 600 "${NODE_PARAMS_FILE}" 2>/dev/null || true
+            log_info "restored node.params from ${snap}"
         fi
         log_info "restored units/geodata from ${snap}"
     fi

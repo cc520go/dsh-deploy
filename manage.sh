@@ -53,7 +53,6 @@ _bbr_lib() {
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/hy2.sh"
 
-MENU_NAME="DSH 一键部署"
 
 usage() {
     printf 'Usage: %s [command] [args]\n' "$(basename "$0")"
@@ -170,7 +169,7 @@ cmd_check_update() {
 cmd_upgrade() {
     local target="${1:-}"
     if [[ -z "${target}" ]]; then
-        printf 'Target version (e.g. 26.10.21): '
+        printf 'Target version (e.g. 26.10.31): '
         read -r target || target=""
     fi
     if [[ -z "${target}" ]]; then
@@ -479,6 +478,37 @@ cmd_share() {
 # The timer is started only AFTER sshd backups are made; if it is never
 # confirmed, it restores the backups at 10 minutes and the next menu 1
 # entry prints "上次未确认，已自动回滚" once, then clears the state.
+# _sshd_restore_bak <backup>: restore one sshd backup to its original path.
+# Returns non-zero when the backup is missing or the copy fails, so callers
+# can report a failed restore instead of claiming the auth change was undone.
+_sshd_restore_bak() {
+    local bak="$1" orig
+    [[ -n "${bak}" ]] || return 1
+    if [[ ! -f "${bak}" ]]; then
+        log_error "sshd 备份不存在: ${bak}"
+        return 1
+    fi
+    # backup name is <path>.bak-YYYYMMDD-HHMMSS; strip the suffix.
+    orig="$(printf '%s' "${bak}" | sed -E 's/\.bak-[0-9]+-[0-9]+$//')"
+    if ! cp -a --remove-destination "${bak}" "${orig}"; then
+        log_error "恢复 sshd 配置失败: ${bak} -> ${orig}"
+        return 1
+    fi
+    return 0
+}
+
+# _sshd_restore_all <main-backup> <backup-list>: restore every sshd backup.
+# Returns 0 only when all copies succeeded; any failure is reported and the
+# caller must not claim the previous auth state was restored.
+_sshd_restore_all() {
+    local main_bak="$1" list="$2" f rc=0
+    [[ -n "${main_bak}" ]] && { _sshd_restore_bak "${main_bak}" || rc=1; }
+    for f in ${list}; do
+        _sshd_restore_bak "${f}" || rc=1
+    done
+    return "${rc}"
+}
+
 auth_state_file() {
     if [[ "${XRAY_TEST_MODE:-0}" == "1" ]]; then
         test_override XRAY_TEST_AUTH_STATE || printf '/tmp/dsh-auth-rollback-test.state'
@@ -498,18 +528,28 @@ auth_timer_start() {
         return 0
     fi
     state="$(auth_state_file)"; log="$(auth_log_file)"
-    mkdir -p "$(dirname "${state}")" 2>/dev/null || true
-    {
+    if ! mkdir -p "$(dirname "${state}")" 2>/dev/null; then
+        log_error "auth rollback timer: cannot create state dir for ${state}; no automatic rollback available."
+        return 1
+    fi
+    if ! {
         printf 'pending\n'
         printf 'bak_main=%s\n' "${bak_main}"
         printf 'bak_list=%s\n' "${bak_list}"
-    } > "${state}" 2>/dev/null || { log_warn "auth rollback timer: cannot write state file ${state}."; return 0; }
-    printf '%s auth rollback timer started: 10 minutes, unit dsh-auth-rollback, state %s, log %s\n' "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || printf '')" "${state}" "${log}" >> "${log}" 2>/dev/null || true
-    if command -v systemd-run >/dev/null 2>&1; then
-        systemd-run --on-active=10min --unit=dsh-auth-rollback --timer-property=AccuracySec=1s "${SCRIPT_DIR}/manage.sh" auth-rollback >/dev/null 2>&1 \
-            || log_warn "auth rollback timer: systemd-run failed; timer is a supplement only, the auth change itself is unchanged."
-    else
-        log_warn "auth rollback timer: systemd-run not available; no timer started (supplement only)."
+    } > "${state}" 2>/dev/null; then
+        log_error "auth rollback timer: cannot write state file ${state}; no automatic rollback available."
+        return 1
+    fi
+    printf '%s auth rollback timer starting: 10 minutes, unit dsh-auth-rollback, state %s, log %s\n' "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || printf '')" "${state}" "${log}" >> "${log}" 2>/dev/null || true
+    if ! command -v systemd-run >/dev/null 2>&1; then
+        rm -f "${state}" 2>/dev/null || true
+        log_error "auth rollback timer: systemd-run not available; no automatic rollback will happen."
+        return 1
+    fi
+    if ! systemd-run --on-active=10min --unit=dsh-auth-rollback --timer-property=AccuracySec=1s "${SCRIPT_DIR}/manage.sh" auth-rollback >/dev/null 2>&1; then
+        rm -f "${state}" 2>/dev/null || true
+        log_error "auth rollback timer: systemd-run failed; no automatic rollback will happen."
+        return 1
     fi
     printf '回滚定时器已启动：10 分钟内回菜单确认测通，否则自动恢复备份的 sshd 配置。确认命令：DSH auth-confirm（或再次进菜单 1）。\n'
     return 0
@@ -540,7 +580,7 @@ cmd_auth_confirm() {
     return 0
 }
 cmd_auth_rollback() {
-    local state bak_main bak_list orig f
+    local state bak_main bak_list
     state="$(auth_state_file)"
     if [[ ! -f "${state}" ]] || ! grep -q '^pending' "${state}" 2>/dev/null; then
         log_info "auth rollback: no pending timer state, nothing to restore."
@@ -548,21 +588,27 @@ cmd_auth_rollback() {
     fi
     bak_main="$(grep '^bak_main=' "${state}" 2>/dev/null | cut -d= -f2-)"
     bak_list="$(grep '^bak_list=' "${state}" 2>/dev/null | cut -d= -f2-)"
-    if [[ -n "${bak_main}" && -f "${bak_main}" ]]; then
-        cp -a "${bak_main}" "${bak_main%.bak-*}" 2>/dev/null || true
-        # bak_main suffix is .bak-YYYYMMDD-HHMMSS; strip it for the original path.
-        orig="$(printf '%s' "${bak_main}" | sed -E 's/\.bak-[0-9]+-[0-9]+$//')"
-        cp -a "${bak_main}" "${orig}" 2>/dev/null || true
+    if ! _sshd_restore_all "${bak_main}" "${bak_list}"; then
+        log_error "auth rollback: 恢复 sshd 备份失败，无法保证密码登录已恢复；备份仍在（${bak_main:-无}），请人工检查后重试。"
+        printf 'rolled_back_failed\n' > "${state}" 2>/dev/null || true
+        printf '%s auth rollback FAILED: could not restore sshd backups (timer not confirmed in 10 minutes).\n' "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || printf '')" >> "$(auth_log_file)" 2>/dev/null || true
+        printf '自动回滚失败：sshd 配置可能仍是关闭密码登录的状态，请人工检查备份并重试。\n'
+        return 1
     fi
-    for f in ${bak_list}; do
-        orig="$(printf '%s' "${f}" | sed -E 's/\.bak-[0-9]+-[0-9]+$//')"
-        cp -a "${f}" "${orig}" 2>/dev/null || true
-    done
-    if [[ "${XRAY_TEST_MODE:-0}" != "1" ]] && command -v systemctl >/dev/null 2>&1; then
-        systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true
+    if [[ "${XRAY_TEST_MODE:-0}" != "1" ]]; then
+        if ! { systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || service ssh restart 2>/dev/null || service sshd restart 2>/dev/null; }; then
+            log_error "auth rollback: sshd 配置已恢复，但重启 ssh 服务失败；请立即检查 sshd 是否在运行。"
+            printf 'rolled_back_failed\n' > "${state}" 2>/dev/null || true
+            return 1
+        fi
+    fi
+    if [[ "${XRAY_TEST_MODE:-0}" != "1" ]] && command -v sshd >/dev/null 2>&1 && ! sshd -t 2>/dev/null; then
+        log_error "auth rollback: 配置已恢复，但恢复后的 sshd -t 校验失败；请人工检查 ${bak_main:-备份文件}。"
+        printf 'rolled_back_failed\n' > "${state}" 2>/dev/null || true
+        return 1
     fi
     printf 'rolled_back\n' > "${state}" 2>/dev/null || true
-    printf '%s auth rollback fired: sshd backups restored (timer not confirmed in 10 minutes).\n' "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || printf '')" >> "$(auth_log_file)" 2>/dev/null || true
+    printf '%s auth rollback fired: sshd backups restored and verified (timer not confirmed in 10 minutes).\n' "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || printf '')" >> "$(auth_log_file)" 2>/dev/null || true
     printf '回滚定时器到点未确认，已自动恢复备份的 sshd 配置。\n'
     return 0
 }
@@ -595,7 +641,10 @@ cmd_auth() {
     # Rollback-timer state, shown once on next menu 1 entry:
     local _auth_state
     _auth_state="$(auth_state_file)"
-    if [[ -f "${_auth_state}" ]] && grep -q '^rolled_back' "${_auth_state}" 2>/dev/null; then
+    if [[ -f "${_auth_state}" ]] && grep -q '^rolled_back_failed' "${_auth_state}" 2>/dev/null; then
+        printf '警告：上次自动回滚失败，sshd 配置可能仍是关闭密码登录的状态。请人工检查备份文件，再运行 DSH auth-rollback。\n'
+        rm -f "${_auth_state}" 2>/dev/null || true
+    elif [[ -f "${_auth_state}" ]] && grep -q '^rolled_back' "${_auth_state}" 2>/dev/null; then
         printf '上次未确认，已自动回滚。\n'
         rm -f "${_auth_state}" 2>/dev/null || true
     elif [[ -f "${_auth_state}" ]] && grep -q '^pending' "${_auth_state}" 2>/dev/null; then
@@ -659,9 +708,7 @@ cmd_auth() {
         done < "${auth_keys}"
     fi
     printf '已有密钥数量：%s\n' "${count}"
-    local already=0
     if [[ -f "${auth_keys}" ]] && grep -qF "${key_material}" "${auth_keys}" 2>/dev/null; then
-        already=1
         printf '该公钥已在 authorized_keys 里，跳过追加。\n'
     else
         local stamp bak_keys
@@ -737,27 +784,28 @@ cmd_auth() {
         printf '测试模式：不碰真实 sshd，不重启。已模拟 sshd -t 通过、sshd -T 复核 password no。\n'
         printf '更改完成（测试模式）：密码已关闭（模拟），只留密钥登录。\n'
         printf '请先在新会话里测通密钥登录，不要关掉当前会话。\n'
-        auth_timer_start "${bak_main}" "${bak_list}"
+        if ! auth_timer_start "${bak_main}" "${bak_list}"; then
+            log_error "认证已改（密码已关闭），但自动回滚定时器没起来：请立刻在新会话里确认密钥能登录；登录失败就运行 DSH auth-rollback 手动恢复备份。"
+            return 1
+        fi
         return 0
     fi
     if ! command -v sshd >/dev/null 2>&1; then
         die "sshd 未安装，无法校验，正在恢复备份。"
-        cp -a "${bak_main}" "${sshd_config}" 2>/dev/null || true
-        for bak_file in ${bak_list}; do
-            local orig="${bak_file%.bak-*}"
-            cp -a "${bak_file}" "${orig}" 2>/dev/null || true
-        done
+        if _sshd_restore_all "${bak_main}" "${bak_list}"; then
+            log_warn "sshd 未安装：配置已恢复，未重启 sshd。"
+        else
+            log_error "sshd 未安装，且恢复备份失败：sshd 配置可能仍是被改过的状态（备份: ${bak_main}）。"
+        fi
         return 1
     fi
     if ! sshd -t 2>&1; then
         log_error "sshd -t 校验失败，正在恢复备份，不重启。"
-        cp -a "${bak_main}" "${sshd_config}" 2>/dev/null || true
-        for bak_file in ${bak_list}; do
-            local orig="${bak_file%.bak-*}"
-            # bak suffix is .bak-YYYYMMDD-HHMMSS, orig is file without that suffix
-            orig="$(printf '%s' "${bak_file}" | sed -E 's/\.bak-[0-9]+-[0-9]+$//')"
-            cp -a "${bak_file}" "${orig}" 2>/dev/null || true
-        done
+        if _sshd_restore_all "${bak_main}" "${bak_list}"; then
+            log_warn "sshd 配置文件已恢复（未重启 sshd）。"
+        else
+            log_error "恢复 sshd 备份失败：sshd 配置可能仍是坏的（备份: ${bak_main}）；请人工检查。"
+        fi
         return 1
     fi
     if command -v systemctl >/dev/null 2>&1; then
@@ -770,16 +818,18 @@ cmd_auth() {
     if sshd -T 2>/dev/null | grep -qiE '^passwordauthentication[[:space:]]+no'; then
         printf '更改完成：密码已关闭，只留密钥登录。\n'
         printf '请先在新会话里测通密钥登录，不要关掉当前会话。\n'
-        auth_timer_start "${bak_main}" "${bak_list}"
+        if ! auth_timer_start "${bak_main}" "${bak_list}"; then
+            log_error "认证已改（密码已关闭），但自动回滚定时器没起来：请立刻在新会话里确认密钥能登录；登录失败就运行 DSH auth-rollback 手动恢复备份。"
+            return 1
+        fi
         return 0
     else
         log_error "复核未见 password no，正在恢复备份并重启。"
-        cp -a "${bak_main}" "${sshd_config}" 2>/dev/null || true
-        for bak_file in ${bak_list}; do
-            local orig2
-            orig2="$(printf '%s' "${bak_file}" | sed -E 's/\.bak-[0-9]+-[0-9]+$//')"
-            cp -a "${bak_file}" "${orig2}" 2>/dev/null || true
-        done
+        if _sshd_restore_all "${bak_main}" "${bak_list}"; then
+            log_warn "ssh 配置已恢复，正在重启 ssh 服务。"
+        else
+            log_error "恢复 sshd 备份失败：sshd 配置可能仍是坏的（备份: ${bak_main}）；请人工检查。"
+        fi
         if command -v systemctl >/dev/null 2>&1; then
             systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true
         fi
@@ -1025,7 +1075,7 @@ menu() {
             6) cmd_backup ;;
             7)
                 node_show
-                printf '新伪装域名（直接输入域名即可修改 sni+dest；回车返回）: '
+                printf '新 Reality SNI（会同时改 dest；直接输入域名，回车返回）: '
                 read -r ns || ns=""
                 case "${ns}" in
                     "") ;;

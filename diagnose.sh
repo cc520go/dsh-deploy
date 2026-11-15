@@ -149,6 +149,13 @@ loopback_reality_test() {
     fi
     kill "${pid}" 2>/dev/null || true; wait "${pid}" 2>/dev/null || true
     rm -rf -- "${tmpdir}"
+    # Distinguish "node is broken" from "this server has no way out". Without
+    # a direct outbound request the loopback failure proves nothing, so it is
+    # a SKIP, not a FAIL (a FAIL here told operators to roll back a healthy
+    # node on a box that simply had no egress).
+    if ! curl -4 -fsSL --connect-timeout 8 --max-time 15 "https://example.com" -o /dev/null 2>/dev/null; then
+        printf 'loopback Reality test skipped (no outbound network from this server; cannot judge the node)\n'; return 2
+    fi
     printf 'loopback Reality test FAILED (local client could not complete a request through 127.0.0.1:443; server config itself is unchanged)\n'; return 1
 }
 

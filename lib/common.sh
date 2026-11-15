@@ -85,9 +85,21 @@ snapshot_link_previous() {
         [[ -f "${prev}/${file}" ]] || continue
         grep -qx "binary_sha256=${sha}" "${prev}/meta.txt" 2>/dev/null || continue
         if ln "${prev}/${file}" "${dir}/${file}" 2>/dev/null; then
+            # A previous snapshot's file can be corrupt while its meta.txt
+            # still records the expected hash. Linking it would carry that
+            # corruption into the new snapshot, so verify the linked file and
+            # drop the link when it does not match.
+            if [[ "$(sha256sum "${dir}/${file}" | cut -d' ' -f1)" == "${sha}" ]]; then
+                return 0
+            fi
+            rm -f "${dir}/${file}" 2>/dev/null || true
+            continue
+        fi
+        if cp -a "${prev}/${file}" "${dir}/${file}" 2>/dev/null \
+            && [[ "$(sha256sum "${dir}/${file}" | cut -d' ' -f1)" == "${sha}" ]]; then
             return 0
         fi
-        cp -a "${prev}/${file}" "${dir}/${file}" && return 0
+        rm -f "${dir}/${file}" 2>/dev/null || true
     done
     return 1
 }

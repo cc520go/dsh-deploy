@@ -69,7 +69,7 @@ else
 fi
 
 [[ -f "${HY2_CONF}" ]] && ok "配置存在: ${HY2_CONF}" || no "配置缺失: ${HY2_CONF}"
-[[ -f "${HY2_MARKER}" ]] && ok "标记文件存在（本项目自己装的）" || no "标记文件缺失，脚本下次会判定为“别人的安装”并拒绝操作"
+[[ -f "${HY2_MARKER}" ]] && ok "标记文件存在（本项目自己装的）" || no "标记文件缺失，脚本下次会判定为别人的安装并拒绝操作"
 
 if [[ -f "${HY2_CERT}" ]]; then
     end="$(openssl x509 -in "${HY2_CERT}" -noout -enddate 2>/dev/null | cut -d= -f2)"
@@ -137,7 +137,6 @@ if [[ "${FULL}" -eq 1 ]]; then
         skipit "反向测试跳过：没有 hysteria 客户端（用 HY2_TEST_CLIENT 指一个）"
     else
         pw="$(tr -d '[:space:]' < "${HY2_CONF_DIR}/.password" 2>/dev/null || true)"
-        pin="$(openssl x509 -in "${HY2_CERT}" -outform der 2>/dev/null | sha256sum | cut -d' ' -f1)"
         # Prefer the persisted SNI set by menu 20; fall back to config/bing.
         sni_file="${DSH_STATE_DIR:-/root/.dsh-deploy}/hy2.sni"
         sni=""
@@ -147,7 +146,6 @@ if [[ "${FULL}" -eq 1 ]]; then
         # Talk to the local listener (it binds *:PORT), not the public IP:
         # avoids NAT hairpin puzzles and tests the same server instance.
         host="${HY2_TEST_SERVER:-127.0.0.1:${HY2_PORT}}"
-        sni_check="${HY2_TEST_SNI:-}"
 
         # probe <socksport>: 0 when an HTTPS request through the tunnel
         # actually returns an IP; 1 otherwise. This tests the whole path,

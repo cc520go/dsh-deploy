@@ -3,7 +3,25 @@
 > 这是项目内部交接笔记，不是用户文档；命令可能随版本变化，使用前先对照 README。
 > 公开仓库保留仅为历史记录，不要据此直接操作生产机。
 
-最后更新：2026-11-15
+最后更新：2026-11-15（1.4.3）
+
+## 1.4.3 复审修复（2026-11-15，基线 1.4.2 = `f997a92`）
+
+复审结论：1 个 P0、6 个 P1、13 个 P2，外加 686 实测 1 个 bug。本版处理 P0 全部、
+P1 全部、P2 中成本低收益高的 9 项，其余如实留在下面。
+
+- P0：`hy2_snapshot_restore` 验 meta/hash + 验服务状态，失败返回非 0；
+  8 处调用统一走 `hy2_rollback_after_failure`，不再 `|| true` 后谎报回滚成功。
+- P1：快照补 `node.params`（含 `params_sha256`）并随 full 恢复一起还原；
+  `cmd_auth_rollback` 与菜单 1 恢复分支改失败即报；`auth_timer_start` 立不起来
+  当失败报；公开 TODO 删掉 live 服务器 IP/端口/密码表述；
+  `smoke-remote.sh` 进 `SHA256SUMS`；CHANGELOG 写明 HY2 修复后仍不含握手探活。
+- 已修 P2：构建可复现、curl 超时、摘要只强制 SHA256/512、测试模式不依赖
+  宿主 systemctl、443 检查失败关闭、硬链接复用复核哈希、HY2 known-good、
+  诊断环回无网报 SKIP、双栈机 IPv4 检测、菜单 7/20 文案、CI 权限与 shellcheck 级别、
+  `XRAY_INSTALLER_URL` 死配置。
+- 未做（留给 1.4.4）：HY2 真实握手探活（需 hysteria 客户端，测试要联网）、
+  units/geodata 纳入快照哈希、云电脑脚本重写。
 
 ## 1.4.2 审计修复（2026-11-15）
 
@@ -22,19 +40,20 @@
 - 旧密钥：`63AEB2BD09A2458B54D7AB1E7F938C08CA8E68D6`，仅保留公钥，标记 retired；不再用于新签名。
 - 私钥只存在维护者本机 keyring，发布前必须确认离线备份与试签；备份由维护者执行，不写入仓库。
 
-## 新云服务器（已到货 2026-11-15）
+## 新云服务器（验收机，2026-11-15 起）
 
-已到货 `104.219.211.52`（Debian 12，SSH 端口 31228）；待接 CI 补充环境并跑
-`smoke-remote.sh --full`，通过后再勾下面各项。
+一台 **Debian 12** 机器待接 CI 补充环境并跑 `smoke-remote.sh --full`，
+通过后再勾下面各项。主机地址、SSH 端口与凭据只保存在维护者的私有记录里，
+不写进仓库、不写进发布包（`tools/build-release.sh` 会把 `docs/` 打进 tarball）。
 
-1. 系统装 **Debian 12**，给我 root SSH（我把公钥给你，或你给我密码）。
-2. 我这边执行：
+1. 机器装 **Debian 12**，用密钥登录接入（不在这里记录 IP / 端口 / 密码）。
+2. 接入后由维护者执行：
    ```bash
-   bash dsh-install-1.0.1.sh --auto --with-hy2
+   bash dsh-install-<version>.sh --auto --with-hy2
    bash smoke-remote.sh --full
    ```
 3. 绿了之后，这台机器可以当：
-   - **CI 的补充环境**：真实 systemd，跑 `tests/run_tests.sh` 全量（容器里缺 systemd，有 4 项只能跳过）；
+   - **CI 的补充环境**：真实 systemd，跑 `tests/run_tests.sh` 全量与 `smoke-remote.sh --full`；
    - **客户端侧验证机**：装 hysteria 客户端 / sing-box，验证 pin、协议互操作；
    - **第二台节点**：和 测试机 互为备份，解决"单机单点"这个先天缺陷。
 
@@ -114,7 +133,7 @@
 
 ## 已知限制（别忘）
 
-- CI 跑在 `debian:12` 容器里，**没有 systemd**，所以 4 个环境类测试（`t_env_check_debian12`、
-  `t_install_completion`、两个 logrotate apt 用例）在 CI 里跳过；真实机器上由 `smoke-remote.sh` 覆盖。
+- 1.4.3 起环境类测试在测试模式下不再要求真实 `systemctl`，CI 里也照跑；真实 systemd 的
+  验收（服务重启、监听、防火墙）仍由 `tools/smoke-remote.sh` 在真机上覆盖。
 - `pinSHA256` 只有 V2rayNG 认，官方 hysteria 客户端不认；所以服务端自检里这项永远是 SKIP，
   真正的验证在客户端侧（已实测：坏 pin → 服务端零记录）。

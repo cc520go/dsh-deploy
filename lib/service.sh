@@ -67,7 +67,11 @@ abort_upgrade() {
 # from the GitHub API, parsed with grep/sed (no jq). Empty on failure.
 official_latest_version() {
     local body tag
-    body="$(curl -fsSL -A "DSH/1.1" \
+    # Bounded timeouts so a stuck API call cannot hang the menu; the
+    # User-Agent carries the real DSH release version instead of a stale
+    # hard-coded one.
+    body="$(curl -fsSL --connect-timeout 15 --max-time 30 \
+        -A "DSH/$(dsh_release_version)" \
         "https://api.github.com/repos/XTLS/Xray-core/releases/latest" 2>/dev/null)" \
         || { die "failed to query GitHub API for the latest release."; return 1; }
     tag="$(printf '%s' "${body}" | grep -oE '"tag_name"[[:space:]]*:[[:space:]]*"[^"]+"' | head -1 \

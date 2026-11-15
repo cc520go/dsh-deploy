@@ -45,9 +45,13 @@ INSTALLER_PINNED_SHA256="934ecb26ded1089f849ac238d5170f1159fe4b6ca300d4f1e67730b
 download_file() {
     local url="$1" dest="$2"
     if command -v curl >/dev/null 2>&1; then
-        curl -fL --retry 2 -o "${dest}" "${url}" || { die "download failed: ${url}"; return 1; }
+        # Bounded timeouts: a hung connection must fail the install instead of
+        # blocking it forever. --max-time covers slow-but-alive transfers too.
+        curl -fL --retry 3 --retry-delay 1 --connect-timeout 20 --max-time 900 \
+            -o "${dest}" "${url}" || { die "download failed: ${url}"; return 1; }
     elif command -v wget >/dev/null 2>&1; then
-        wget -O "${dest}" "${url}" || { die "download failed: ${url}"; return 1; }
+        wget -q --timeout=20 --tries=3 -O "${dest}" "${url}" \
+            || { die "download failed: ${url}"; return 1; }
     else
         die "neither curl nor wget is available"
         return 1
@@ -90,10 +94,10 @@ verify_dgst() {
         die "checksum file missing: ${dgst_file} — refusing to install unverified code."
         return 1
     fi
-    for key in MD5 SHA1 SHA256 SHA512; do
+    # SHA256/SHA512 are the security-relevant digests: both are REQUIRED, and
+    # a missing line is still a hard failure (fail closed).
+    for key in SHA256 SHA512; do
         case "${key}" in
-            MD5)    tool="md5sum" ;;
-            SHA1)   tool="sha1sum" ;;
             SHA256) tool="sha256sum" ;;
             SHA512) tool="sha512sum" ;;
         esac
@@ -109,7 +113,27 @@ verify_dgst() {
             return 1
         fi
     done
-    log_info "checksum OK: all four digests match (${file})."
+    # MD5/SHA1 are legacy extras: verify them when the upstream .dgst still
+    # carries them, but do not fail an otherwise valid release just because
+    # upstream dropped weak digests (that hardening must not break installs).
+    for key in MD5 SHA1; do
+        expected="$(dgst_value "${dgst_file}" "${key}")"
+        [[ -n "${expected}" ]] || continue
+        case "${key}" in
+            MD5)  tool="md5sum" ;;
+            SHA1) tool="sha1sum" ;;
+        esac
+        if ! command -v "${tool}" >/dev/null 2>&1; then
+            log_warn "${key} line present but ${tool} is missing; skipping the optional ${key} check."
+            continue
+        fi
+        actual="$("${tool}" "${file}" | cut -d' ' -f1)"
+        if [[ "${actual,,}" != "${expected,,}" ]]; then
+            die "${key} mismatch for ${file} (expected ${expected}, got ${actual})."
+            return 1
+        fi
+    done
+    log_info "checksum OK: SHA256/SHA512 match (${file})."
     return 0
 }
 
@@ -165,7 +189,12 @@ download_core() {
 fetch_installer() {
     local dest="$1" size pinned_hash actual
     validate_mirror_base "${DSH_MIRROR_BASE}" || return 1
-    local url="${XRAY_INSTALLER_URL:-${INSTALLER_URL_DEFAULT}}"
+    # URL selection is deliberate: a configured mirror wins (so domestic
+    # installs stay offline-capable), otherwise the pinned commit is used.
+    # There is no env override here on purpose: an override would bypass the
+    # pinned hash check, and a silent no-op override (the old
+    # XRAY_INSTALLER_URL) only misled operators.
+    local url="${INSTALLER_URL_DEFAULT}"
     if [[ -n "${DSH_MIRROR_BASE}" ]]; then
         url="${DSH_MIRROR_BASE%/}/xray/install-release.sh"
     elif [[ "${INSTALLER_PINNED_COMMIT}" != "PLACEHOLDER" ]]; then

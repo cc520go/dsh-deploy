@@ -172,10 +172,18 @@ hy2_snapshot_create() {
         # Reuse an older snapshot's binary (same hash), not the live path.
         if ! snapshot_link_previous "${bin_sha_now}" "${dir}" "${HY2_SNAPSHOT_PARENT}" \
                 "${HY2_SNAPSHOT_PREFIX}*" 'hysteria.bin'; then
-            cp -a "${HY2_BIN}" "${dir}/hysteria.bin" 2>/dev/null || true
+            cp -a "${HY2_BIN}" "${dir}/hysteria.bin" \
+                || { log_error "HY2 快照：复制二进制失败，拒绝生成不可恢复的快照"; return 1; }
         fi
     fi
-    [[ -f "${HY2_CONF}" ]]  && cp -a "${HY2_CONF}"  "${dir}/config.yaml"  2>/dev/null || true
+    # Binary + config are what a restore is verified against; if either
+    # cannot be captured the snapshot is not a rollback target, so fail
+    # instead of handing back a partially usable one.
+    if [[ -f "${HY2_CONF}" ]]; then
+        cp -a "${HY2_CONF}" "${dir}/config.yaml" \
+            || { log_error "HY2 快照：复制配置失败，拒绝生成不可恢复的快照"; return 1; }
+    fi
+    [[ -f "${HY2_CERT}" ]]  && cp -a "${HY2_CERT}"  "${dir}/cert.pem"     2>/dev/null || true
     [[ -f "${HY2_CERT}" ]]  && cp -a "${HY2_CERT}"  "${dir}/cert.pem"     2>/dev/null || true
     [[ -f "${HY2_KEY}" ]]   && cp -a "${HY2_KEY}"   "${dir}/key.pem"      2>/dev/null || true
     [[ -f "${HY2_UNIT}" ]]  && cp -a "${HY2_UNIT}"  "${dir}/${HY2_SERVICE}.service" 2>/dev/null || true
@@ -210,12 +218,37 @@ hy2_snapshot_list() {
     done | sort -k1,1nr -k2,2r | awk '{print $2}'
 }
 
+# hy2_snapshot_mark_good <dir>: mark a snapshot as the verified known-good
+# one. Only one HY2 snapshot carries the marker at a time (the marker moves
+# with each verified state), and pruning never deletes a marked snapshot.
+hy2_snapshot_mark_good() {
+    local dir="$1" other
+    [[ -d "${dir}" ]] || return 1
+    while IFS= read -r other; do
+        [[ -z "${other}" || "${other}" == "${dir}" ]] && continue
+        rm -f "${other}/known-good" 2>/dev/null || true
+    done < <(hy2_snapshot_list)
+    printf '%s\n' "$(date +%Y%m%d-%H%M%S)" > "${dir}/known-good" 2>/dev/null || return 1
+    chmod 600 "${dir}/known-good" 2>/dev/null || true
+    log_info "HY2 known-good 快照已标记: ${dir}"
+    return 0
+}
+
 hy2_snapshot_prune() {
     local -a all
-    local i
+    local i count=0
     mapfile -t all < <(hy2_snapshot_list)
-    [[ "${#all[@]}" -le "${HY2_SNAPSHOT_KEEP}" ]] && return 0
-    for ((i = HY2_SNAPSHOT_KEEP; i < ${#all[@]}; i++)); do
+    for ((i = 0; i < ${#all[@]}; i++)); do
+        # A marked known-good snapshot never consumes a keep slot and is
+        # never pruned, so the last verified-good state cannot be rotated
+        # away by later snapshots.
+        if [[ -f "${all[$i]}/known-good" ]]; then
+            continue
+        fi
+        count=$((count + 1))
+        if [[ "${count}" -le "${HY2_SNAPSHOT_KEEP}" ]]; then
+            continue
+        fi
         rm -rf -- "${all[$i]}" 2>/dev/null || true
     done
     return 0
@@ -223,20 +256,122 @@ hy2_snapshot_prune() {
 
 hy2_snapshot_latest() { hy2_snapshot_list | head -1; }
 
-# hy2_snapshot_restore <dir>: restore binary/config/cert/unit from a snapshot.
+# hy2_snapshot_meta_value <dir> <key>: prints one meta.txt value or nothing.
+hy2_snapshot_meta_value() {
+    local dir="$1" key="$2"
+    awk -F= -v k="${key}" '$1==k{print $2; exit}' "${dir}/meta.txt" 2>/dev/null | tr -d '\r'
+}
+
+# hy2_snapshot_verify_meta <dir>: verify a HY2 snapshot payload against its
+# meta.txt BEFORE any live file is touched. A snapshot whose binary/config
+# hash does not match meta.txt is not a trustworthy rollback target: it could
+# silently install a truncated or tampered binary/config. Missing meta.txt,
+# missing hash fields, a recorded file that is absent, or a hash mismatch all
+# fail closed (return 1).
+hy2_snapshot_verify_meta() {
+    local dir="$1" b_meta c_meta actual
+    if [[ ! -f "${dir}/meta.txt" ]]; then
+        log_error "HY2 快照缺少 meta.txt，拒绝恢复: ${dir}"
+        return 1
+    fi
+    b_meta="$(hy2_snapshot_meta_value "${dir}" binary_sha256)"
+    c_meta="$(hy2_snapshot_meta_value "${dir}" config_sha256)"
+    if [[ -z "${b_meta}" || -z "${c_meta}" ]]; then
+        log_error "HY2 快照 meta.txt 缺 binary_sha256/config_sha256，拒绝恢复: ${dir}"
+        return 1
+    fi
+    if [[ -f "${dir}/hysteria.bin" ]]; then
+        if [[ "${b_meta}" == "none" ]]; then
+            log_error "HY2 快照有二进制但 meta.txt 没记录哈希，拒绝恢复: ${dir}"
+            return 1
+        fi
+        actual="$(sha256sum "${dir}/hysteria.bin" | cut -d' ' -f1)"
+        if [[ "${actual}" != "${b_meta}" ]]; then
+            log_error "HY2 快照二进制 SHA256 不符，拒绝恢复: ${dir}"
+            return 1
+        fi
+    elif [[ "${b_meta}" != "none" ]]; then
+        log_error "HY2 快照 meta.txt 记录了二进制但 hysteria.bin 缺失，拒绝恢复: ${dir}"
+        return 1
+    fi
+    if [[ -f "${dir}/config.yaml" ]]; then
+        if [[ "${c_meta}" == "none" ]]; then
+            log_error "HY2 快照有配置但 meta.txt 没记录哈希，拒绝恢复: ${dir}"
+            return 1
+        fi
+        actual="$(sha256sum "${dir}/config.yaml" | cut -d' ' -f1)"
+        if [[ "${actual}" != "${c_meta}" ]]; then
+            log_error "HY2 快照配置 SHA256 不符，拒绝恢复: ${dir}"
+            return 1
+        fi
+    elif [[ "${c_meta}" != "none" ]]; then
+        log_error "HY2 快照 meta.txt 记录了配置但 config.yaml 缺失，拒绝恢复: ${dir}"
+        return 1
+    fi
+    return 0
+}
+
+# hy2_snapshot_restore <dir>: verify then restore binary/config/cert/unit from
+# a snapshot, and verify the service actually came back. Returns 0 only when
+# every install step succeeded and the service reports active; a rejected
+# snapshot or a service that does not start returns 1, so callers report the
+# real outcome instead of claiming a rollback worked.
 hy2_snapshot_restore() {
-    local dir="$1"
-    [[ -d "${dir}" ]] || { die "快照不存在: ${dir}"; return 1; }
+    local dir="$1" state
+    if [[ ! -d "${dir}" ]]; then
+        log_error "HY2 快照不存在: ${dir}"
+        return 1
+    fi
+    hy2_snapshot_verify_meta "${dir}" || return 1
     run_systemctl stop "${HY2_SERVICE}" >/dev/null 2>&1 || true
-    [[ -f "${dir}/hysteria.bin" ]] && { install -m 755 -o root -g root "${dir}/hysteria.bin" "${HY2_BIN}" || return 1; }
-    [[ -f "${dir}/config.yaml" ]]  && { install -m 600 -o "${HY2_USER}" -g "${HY2_USER}" "${dir}/config.yaml" "${HY2_CONF}" || return 1; }
-    [[ -f "${dir}/cert.pem" ]]     && { install -m 600 -o "${HY2_USER}" -g "${HY2_USER}" "${dir}/cert.pem" "${HY2_CERT}" || return 1; }
-    [[ -f "${dir}/key.pem" ]]      && { install -m 600 -o "${HY2_USER}" -g "${HY2_USER}" "${dir}/key.pem" "${HY2_KEY}" || return 1; }
-    [[ -f "${dir}/${HY2_SERVICE}.service" ]] && { install -m 644 "${dir}/${HY2_SERVICE}.service" "${HY2_UNIT}" || return 1; }
+    if [[ -f "${dir}/hysteria.bin" ]]; then
+        install -m 755 -o root -g root "${dir}/hysteria.bin" "${HY2_BIN}" \
+            || { log_error "HY2 恢复二进制失败: ${HY2_BIN}"; return 1; }
+    fi
+    if [[ -f "${dir}/config.yaml" ]]; then
+        install -m 600 -o "${HY2_USER}" -g "${HY2_USER}" "${dir}/config.yaml" "${HY2_CONF}" \
+            || { log_error "HY2 恢复配置失败: ${HY2_CONF}"; return 1; }
+    fi
+    if [[ -f "${dir}/cert.pem" ]]; then
+        install -m 600 -o "${HY2_USER}" -g "${HY2_USER}" "${dir}/cert.pem" "${HY2_CERT}" \
+            || { log_error "HY2 恢复证书失败: ${HY2_CERT}"; return 1; }
+    fi
+    if [[ -f "${dir}/key.pem" ]]; then
+        install -m 600 -o "${HY2_USER}" -g "${HY2_USER}" "${dir}/key.pem" "${HY2_KEY}" \
+            || { log_error "HY2 恢复私钥失败: ${HY2_KEY}"; return 1; }
+    fi
+    if [[ -f "${dir}/${HY2_SERVICE}.service" ]]; then
+        install -m 644 "${dir}/${HY2_SERVICE}.service" "${HY2_UNIT}" \
+            || { log_error "HY2 恢复 systemd 单元失败: ${HY2_UNIT}"; return 1; }
+    fi
     run_systemctl daemon-reload >/dev/null 2>&1 || true
     run_systemctl start "${HY2_SERVICE}" >/dev/null 2>&1 || true
-    log_info "已从快照恢复: ${dir}"
+    state="$(hy2_service_state)"
+    if [[ "${state}" != "active" ]]; then
+        log_error "HY2 恢复后服务未启动（状态 ${state}），回滚未完成: ${dir}"
+        return 1
+    fi
+    log_info "已从快照恢复并验证服务 active: ${dir}"
+    hy2_snapshot_mark_good "${dir}" >/dev/null 2>&1 || true
     return 0
+}
+
+# hy2_rollback_after_failure <snap> <reason>: restore the snapshot after a
+# failed change and report the real result. Never claims the rollback worked
+# when the snapshot is missing, rejected, or the service did not come back.
+hy2_rollback_after_failure() {
+    local snap="$1" reason="$2"
+    if [[ -z "${snap}" || ! -d "${snap}" ]]; then
+        log_error "HY2 操作失败（${reason}），且没有可用快照，无法自动回滚；请人工检查 ${HY2_CONF_DIR} 与 journalctl -u ${HY2_SERVICE}"
+        return 1
+    fi
+    log_warn "HY2 操作失败（${reason}），回滚到 ${snap}"
+    if hy2_snapshot_restore "${snap}"; then
+        log_info "HY2 已回滚并验证: ${snap}"
+        return 0
+    fi
+    log_error "HY2 ROLLBACK FAILED: 回滚未能恢复并验证服务，HY2 节点可能仍是坏的（快照: ${snap}）；请查看 journalctl -u ${HY2_SERVICE} -n 50"
+    return 1
 }
 
 # -------------------------------------------------------- install bits ----
@@ -648,16 +783,15 @@ hy2_cmd_install() {
             log_info "已取消。"; return 0
         fi
         snap="$(hy2_snapshot_create)" || return 1
-        hy2_download_binary "${target_ver}" "${arch}" || { log_warn "升级失败，开始回滚"; hy2_snapshot_restore "${snap}" || true; return 1; }
+        hy2_download_binary "${target_ver}" "${arch}" || { hy2_rollback_after_failure "${snap}" "下载或 SHA256 校验失败" || true; return 1; }
         hy2_fix_perms
         if ! hy2_config_test; then
-            log_error "新二进制配置测试未过，回滚到 ${snap}"
-            hy2_snapshot_restore "${snap}" || true
+            hy2_rollback_after_failure "${snap}" "新二进制配置测试未过" || true
             return 1
         fi
         hy2_tune_udp || true
         run_systemctl enable "${HY2_SERVICE}" >/dev/null 2>&1 || true
-        run_systemctl restart "${HY2_SERVICE}" || { log_error "重启失败，回滚"; hy2_snapshot_restore "${snap}" || true; return 1; }
+        run_systemctl restart "${HY2_SERVICE}" || { hy2_rollback_after_failure "${snap}" "升级后服务重启失败" || true; return 1; }
         hy2_selfcheck || log_warn "升级后自检未全过，请人工确认。链接、密码、端口都没变。"
         pw="$(hy2_read_password)" || true
         if [[ -n "${pw}" ]]; then
@@ -712,7 +846,13 @@ hy2_cmd_install() {
 
     hy2_tune_udp || true
     hy2_selfcheck || true
-    hy2_snapshot_create >/dev/null || true
+    # Install finished with the config test and restart verified: snapshot the
+    # known-good state and mark it, so later repairs cannot rotate it away.
+    local good_snap
+    good_snap="$(hy2_snapshot_create 2>/dev/null || true)"
+    if [[ -n "${good_snap}" ]]; then
+        hy2_snapshot_mark_good "${good_snap}" >/dev/null 2>&1 || true
+    fi
 
     pin="$(hy2_cert_pin)"
     local link
@@ -826,13 +966,12 @@ hy2_cmd_rotate_cert() {
         log_info "已取消。"; return 0
     fi
     snap="$(hy2_snapshot_create)" || return 1
-    hy2_gen_cert || { hy2_snapshot_restore "${snap}" || true; return 1; }
+    hy2_gen_cert || { hy2_rollback_after_failure "${snap}" "生成新证书失败" || true; return 1; }
     if ! hy2_config_test; then
-        log_error "新证书配置测试失败，回滚。"
-        hy2_snapshot_restore "${snap}" || true
+        hy2_rollback_after_failure "${snap}" "新证书配置测试失败" || true
         return 1
     fi
-    run_systemctl restart "${HY2_SERVICE}" || { hy2_snapshot_restore "${snap}" || true; return 1; }
+    run_systemctl restart "${HY2_SERVICE}" || { hy2_rollback_after_failure "${snap}" "轮换证书后重启失败" || true; return 1; }
     pw="$(hy2_read_password)" || return 1
     pin="$(hy2_cert_pin)"
     ip="$(hy2_public_ip || true)"; [[ -z "${ip}" ]] && ip="<你的服务器IP>"
@@ -850,7 +989,8 @@ hy2_cmd_restore() {
     if ! confirm "将把 HY2 恢复到快照 ${d}（只动 HY2，主线不动）。"; then
         log_info "已取消。"; return 0
     fi
-    hy2_snapshot_restore "${d}"
+    hy2_snapshot_restore "${d}" || { log_error "HY2 恢复失败，快照未通过校验或服务未起来（快照: ${d}）"; return 1; }
+    return 0
 }
 
 # hy2_validate_sni <domain>: public DNS name only, no scheme/port/path.
@@ -883,14 +1023,17 @@ hy2_set_sni() {
     HY2_SNI="${domain}"
     if ! hy2_gen_cert || ! hy2_write_config "${pw}" "${ip}" "${url}"; then
         printf '%s\n' "${old}" > "${HY2_SNI_FILE}"; HY2_SNI="${old}"
-        [[ -n "${snap}" ]] && hy2_snapshot_restore "${snap}" || true
+        hy2_rollback_after_failure "${snap}" "重签证书或写配置失败" || true
         return 1
     fi
     hy2_fix_perms
     if ! hy2_config_test || ! run_systemctl restart "${HY2_SERVICE}"; then
         printf '%s\n' "${old}" > "${HY2_SNI_FILE}"; HY2_SNI="${old}"
-        [[ -n "${snap}" ]] && hy2_snapshot_restore "${snap}" || true
-        die "HY2 配置/重启失败，已回滚到 ${old}。"
+        if hy2_rollback_after_failure "${snap}" "配置测试或重启失败"; then
+            die "HY2 配置/重启失败，已回滚到 ${old}（已验证）。"
+        else
+            die "HY2 配置/重启失败，且 ROLLBACK FAILED：HY2 节点可能仍是坏的（快照: ${snap:-无}）。"
+        fi
         return 1
     fi
     pin="$(hy2_cert_pin)" || { die "读证书指纹失败"; return 1; }
@@ -901,7 +1044,7 @@ hy2_set_sni() {
     return 0
 }
 
-# hy2_cmd_sni: show/set/reset the HY2 TLS SNI (menu 22).
+# hy2_cmd_sni: show/set/reset the HY2 TLS SNI (menu 20).
 hy2_cmd_sni() {
     local sub="${1:-}" domain=""
     if [[ -z "${sub}" ]]; then

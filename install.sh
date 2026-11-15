@@ -194,11 +194,15 @@ _ensure_env_tools() {
 # not bind). An active xray service on 443 is the reinstall/upgrade
 # path and passes. ss missing -> warn only, never a silent pass.
 _check_port_443() {
-    if ! command -v ss >/dev/null 2>&1; then
-        log_warn "ss not found; 443 occupancy check skipped (port check will be limited)."
-        return 0
-    fi
     local ports
+    # Test mode reads listen_ports from the canned fixture, so it never needs
+    # the real ss. Production without ss cannot prove 443 is free: that is a
+    # fail-closed case now, not a silent pass (the old warn-and-return-0 let
+    # an install proceed into a bind conflict).
+    if [[ "${XRAY_TEST_MODE:-0}" != "1" ]] && ! command -v ss >/dev/null 2>&1; then
+        die "ss not found; cannot verify port 443 is free. Install iproute2 (apt-get install -y iproute2) and re-run."
+        return 1
+    fi
     ports="$(listen_ports)"
     case " ${ports} " in
         *" 443 "*)
@@ -285,7 +289,12 @@ env_check() {
     fi
     log_info "OS supported: Debian ${os_ver}"
     detect_arch_suffix >/dev/null || return 1
-    require_command systemctl || return 1
+    # run_systemctl is mocked in test mode, so requiring the real systemctl
+    # there only made the suite red on hosts without systemd (CI containers,
+    # dev sandboxes). Production still fails closed.
+    if [[ "${XRAY_TEST_MODE:-0}" != "1" ]]; then
+        require_command systemctl || return 1
+    fi
     if [[ ! -d /run/systemd/system ]] && [[ "${XRAY_TEST_MODE:-0}" != "1" ]]; then
         die "systemd does not appear to be running (no /run/systemd/system)."
         return 1
@@ -480,7 +489,11 @@ DETECT_IP_VERIFIED="0"
 fetch_one_ip() {
     local svc="$1" ip attempt
     for attempt in 1 2; do
-        ip="$(curl -fsSL --max-time 10 "${svc}" 2>/dev/null | tr -d '[:space:]')"
+        # -4 is essential on dual-stack hosts: without it two of the three
+        # echo services answered with the machine's IPv6 address, our IPv4
+        # filter discarded both, and the host was left "unverified" (686
+        # real-machine bug, 2026-11-15).
+        ip="$(curl -4 -fsSL --max-time 10 "${svc}" 2>/dev/null | tr -d '[:space:]')"
         if [[ "${ip}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             printf '%s' "${ip}"
             return 0
@@ -496,7 +509,7 @@ detect_public_ip() {
     local out_var="$1" svc fetched first second third chosen
     first=""; second=""; third=""
     DETECT_IP_VERIFIED="0"
-    for svc in "https://ifconfig.me/ip" "https://api.ipify.org" "https://icanhazip.com"; do
+    for svc in "https://ifconfig.me/ip" "https://api.ipify.org" "https://ipv4.icanhazip.com"; do
         if fetched="$(fetch_one_ip "${svc}")"; then
             if [[ -z "${first}" ]]; then first="${fetched}";
             elif [[ -z "${second}" ]]; then second="${fetched}";

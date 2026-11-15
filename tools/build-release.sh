@@ -102,7 +102,17 @@ mkdir -p "${DIST}"
 rm -f "${DIST}"/lisa-*.tar.gz "${DIST}"/lisa-install-*.sh "${DIST}"/dsh-*.tar.gz \
       "${DIST}"/dsh-install-*.sh "${DIST}"/dsh-install.sh "${DIST}"/lisa-install.sh
 TARBALL="${DIST}/${NAME}.tar.gz"
-tar -czf "${TARBALL}" -C "${STAGE}" "${NAME}"
+# Reproducible tarball: sorted member order, fixed owner/group, fixed mtime
+# (the commit timestamp by default), and gzip -n so no host name/timestamp
+# ends up in the gzip header. Two builds from the same commit then produce
+# the same SHA256, which is what lets the release hash self-prove the tree.
+if [[ -z "${SOURCE_DATE_EPOCH:-}" ]]; then
+    SOURCE_DATE_EPOCH="$(git -C "${REPO_ROOT}" log -1 --format=%ct 2>/dev/null || true)"
+    [[ -n "${SOURCE_DATE_EPOCH}" ]] || SOURCE_DATE_EPOCH="$(date +%s)"
+fi
+export SOURCE_DATE_EPOCH
+tar --sort=name --mtime="@${SOURCE_DATE_EPOCH}" --owner=0 --group=0 --numeric-owner \
+    -cf - -C "${STAGE}" "${NAME}" | gzip -n > "${TARBALL}"
 info "built $(basename "${TARBALL}") ($(du -h "${TARBALL}" | cut -f1))"
 
 # --------------------------------------------------- single-file installer ----
@@ -182,24 +192,24 @@ bash -n "${SELF}" || { printf '[FAIL] 生成的安装器语法错误\n' >&2; exi
 info "built $(basename "${SELF}") ($(du -h "${SELF}" | cut -f1))"
 
 # ------------------------------------------------------------- checksums ----
-(
-    cd "${DIST}"
-    sha256sum "$(basename "${TARBALL}")" "$(basename "${SELF}")" > SHA256SUMS
-    # Stable aliases share the versioned installer's bytes. dsh-install.sh is
-    # the new name; lisa-install.sh remains for old links during migration.
-    alias_hash="$(sha256sum "$(basename "${SELF}")" | cut -d' ' -f1)"
-    printf '%s  %s\n' "${alias_hash}" "dsh-install.sh" >> SHA256SUMS
-    printf '%s  %s\n' "${alias_hash}" "lisa-install.sh" >> SHA256SUMS
-    cp -f "$(basename "${SELF}")" dsh-install.sh
-    cp -f "$(basename "${SELF}")" lisa-install.sh
-)
-info "wrote dist/SHA256SUMS"
-
-# The self-check script is a release asset too; it used to arrive only
-# because dist/smoke-remote.sh was committed. dist/ is no longer tracked.
+# The self-check script is a release asset too, so it goes into the signed
+# manifest like every other asset. It used to be copied AFTER SHA256SUMS was
+# written, which left the one asset operators run against a real server as
+# the only unverifiable download.
 cp "${REPO_ROOT}/tools/smoke-remote.sh" "${DIST}/smoke-remote.sh" \
     || fail "missing: tools/smoke-remote.sh"
 info "copied smoke-remote.sh"
+
+(
+    cd "${DIST}"
+    # Stable aliases share the versioned installer's bytes. dsh-install.sh is
+    # the new name; lisa-install.sh remains for old links during migration.
+    cp -f "$(basename "${SELF}")" dsh-install.sh
+    cp -f "$(basename "${SELF}")" lisa-install.sh
+    sha256sum "$(basename "${TARBALL}")" "$(basename "${SELF}")" \
+        dsh-install.sh lisa-install.sh smoke-remote.sh > SHA256SUMS
+)
+info "wrote dist/SHA256SUMS"
 
 # 分离签名：SHA256SUMS.asc 由仓库里的公钥可验。没有签名私钥就拒绝发布，
 # 除非显式 --no-sign（仅用于本地调试）。
