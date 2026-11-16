@@ -2600,6 +2600,40 @@ t_auth_requires_sshd_restart() {
     return 0
 }
 
+t_auth_restart_failure_recovers_daemon() {
+    # 1.4.10 H2 gap: when the restart fails, restoring the backups is not
+    # enough — the daemon may be left stopped, so the operator closes the
+    # session and is locked out. After a failed restart the code must make a
+    # best-effort restart attempt (never reporting success). The attempt is
+    # recorded through the test hook instead of touching the real daemon.
+    # shellcheck disable=SC1091
+    source "${REPO_ROOT}/manage.sh"
+    local d="${SANDBOX}/auth-restart-recover"
+    mkdir -p "${d}/sshd_config.d"
+    printf 'PasswordAuthentication yes\n' > "${d}/sshd_config"
+    printf 'PasswordAuthentication yes\n' > "${d}/sshd_config.d/10-x.conf"
+    : > "${d}/authorized_keys"
+    export XRAY_TEST_SSHD_CONFIG="${d}/sshd_config" \
+           XRAY_TEST_SSHD_DIR="${d}/sshd_config.d" \
+           XRAY_TEST_AUTH_KEYS="${d}/authorized_keys" \
+           XRAY_TEST_AUTH_STATE="${d}/auth.state" \
+           XRAY_TEST_SSHD_RESTART_LOG="${d}/restart.attempt"
+    local key="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILZv0SN+k8sS2P0tc/+vyt3FYh8wQefXeDavOG/hOtXh test@example"
+    local out rc
+    out="$(printf '%s\nyes\n' "${key}" | XRAY_TEST_SSHD_RESTART=fail cmd_auth 2>&1)" && rc=0 || rc=$?
+    # ① failure is reported as failure
+    [[ "${rc}" -ne 0 ]] || return 1
+    printf '%s' "${out}" | grep -q '重启' || return 1
+    # ② the previous auth state is really back (main file and drop-in)
+    grep -qx 'PasswordAuthentication yes' "${d}/sshd_config" || return 1
+    grep -qx 'PasswordAuthentication yes' "${d}/sshd_config.d/10-x.conf" || return 1
+    # ③ no rollback timer was started for a change that never happened
+    [[ ! -f "${d}/auth.state" ]] || return 1
+    # ④ a best-effort restart was attempted, so the daemon is not left down
+    [[ -s "${d}/restart.attempt" ]] || return 1
+    return 0
+}
+
 t_manage_requires_root() {
     # Any manage.sh subcommand must be refused at the entry when not root.
     local d="${SANDBOX}/mroot"
@@ -2842,6 +2876,7 @@ run_test t_install_preserve_requires_params
 run_test t_prompt_with_default
 run_test t_install_version_requires_upgrade
 run_test t_auth_requires_sshd_restart
+run_test t_auth_restart_failure_recovers_daemon
 run_test t_manage_requires_root
 run_test t_rollback_protects_target
 run_test t_restore_dropin

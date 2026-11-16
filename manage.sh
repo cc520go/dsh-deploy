@@ -537,6 +537,30 @@ _sshd_restore_all() {
     return "${rc}"
 }
 
+# _sshd_restart_best_effort: only for the failed-restart path of cmd_auth.
+# Restoring the backups puts the old config back on disk, but the daemon may
+# already be stopped: if the operator closes the session nothing brings it
+# back. Try to start it again, and never let this attempt change the outcome
+# (it always returns 0; the caller still reports the original failure).
+# Not a verification: a daemon that fails to come back is NOT reported as
+# success anywhere. Test mode records the attempt instead of touching the
+# real service, so the failure path can be exercised without risk.
+_sshd_restart_best_effort() {
+    if [[ "${XRAY_TEST_MODE:-0}" == "1" ]]; then
+        if [[ -n "${XRAY_TEST_SSHD_RESTART_LOG:-}" ]]; then
+            printf 'attempt\n' >> "${XRAY_TEST_SSHD_RESTART_LOG}" 2>/dev/null || true
+        fi
+        printf '测试模式：已模拟“回滚后尽力重启 sshd”这一步（不碰真实服务）。\n'
+        return 0
+    fi
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true
+    else
+        service ssh restart 2>/dev/null || service sshd restart 2>/dev/null || true
+    fi
+    return 0
+}
+
 auth_state_file() {
     if [[ "${XRAY_TEST_MODE:-0}" == "1" ]]; then
         test_override XRAY_TEST_AUTH_STATE || printf '/tmp/dsh-auth-rollback-test.state'
@@ -812,6 +836,7 @@ cmd_auth() {
         if [[ "${XRAY_TEST_SSHD_RESTART:-ok}" != "ok" ]]; then
             log_error "sshd restart FAILED (test hook): the daemon was not confirmed running; password login may be closed. Not reporting success."
             _sshd_restore_all "${bak_main}" "${bak_list}" || log_error "restoring sshd backups also failed."
+            _sshd_restart_best_effort
             return 1
         fi
         printf '测试模式：不碰真实 sshd，不重启。已模拟 sshd -t 通过、sshd -T 复核 password no。\n'
@@ -858,6 +883,7 @@ cmd_auth() {
     if [[ "${restart_ok}" -ne 1 ]]; then
         log_error "sshd restart FAILED / daemon not active: the config says password login is closed but the daemon was NOT confirmed running. Restoring backups; do not close this session."
         _sshd_restore_all "${bak_main}" "${bak_list}" || log_error "restoring sshd backups also failed; check /etc/ssh manually."
+        _sshd_restart_best_effort
         return 1
     fi
     printf '重启后 sshd -T 复核：\n'

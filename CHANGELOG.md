@@ -2,6 +2,54 @@
 
 记录 DSH 脚本自身的版本；Xray 核心版本见 `VERSION`。
 
+## 1.4.10 — 2026-11-16
+
+基线：1.4.9（tag `v1.4.9`，源码提交 `a41c2ac`）。范围冻结为两项：H2 恢复缺口
++ CHANGELOG 测试数字修正。M 类与低优先项按 C 2026-11-16 的决定不进本版，
+记入下方“已知问题”。
+
+### 修复
+
+- **H2 缺口：sshd 重启失败后没人把守护进程拉起来**。`DSH auth` 关闭密码时
+  若重启失败，1.4.9 会恢复备份后直接返回，但守护进程可能已经停着——操作员一
+  关会话就锁在外面。现在恢复备份后再做一次**尽力重启**：失败仍然是失败
+  （退出码不变、不打印“更改完成”、不启动回滚定时器），只是不再把 sshd 留在
+  停着的状态；尽力重启本身失败也不会掩盖原始错误。
+- **CHANGELOG 测试数字写死了作者环境**：1.4.9 写成“1 skipped（`t_archive_xray`，
+  本机缺 `zip`）”，但有 `zip` 的机器跳过的是 `t_auth_timer_fail_closed`。改为
+  只写数字，跳过用例的身份按当次实际输出记录。
+
+### 测试
+
+- 新增回归 `t_auth_restart_failure_recovers_daemon`：注入 sshd 重启失败，断言
+  ① 退出码非零、不透出“更改完成”；② 备份真的恢复（主配置 + drop-in）；
+  ③ 回滚定时器没有启动；④ 确实做了回滚后的尽力重启（测试钩子记录，不碰真
+  实服务）。
+- 全量：97 passed / 0 failed / 1 skipped（本机；跳过的是 `t_archive_xray`，缺
+  `zip`）。与 1.4.9 的 96/0/1 对照：新增 1 项。
+
+### 已知问题（按 C 2026-11-16 决定，不主动修）
+
+以下都在快照 / 恢复 / HY2 边缘路径上，主线（VLESS Reality 安装、升级、回滚、
+卸载）不受影响。实际踩到再修，或由 C 另行决定：
+
+- **M7** 快照里没有 `config.json` 时，`full` 恢复静默跳过并返回成功——
+  “恢复了但没有配置”。规避：恢复后核对 `config.json` 是否存在。
+- **M10 / M11** HY2 快照恢复不还原 `.managed-by-hy2addon` 标记与 `.password`
+  文件。规避：HY2 恢复后重新生成密码 / 重新安装附加标记。
+- **M12** HY2 恢复不建配置目录，卸载后直接恢复会失败。规避：先手工
+  `mkdir -p` 配置目录再恢复。
+- **M8** known-good 标记只在安装 / 修复路径移动，菜单改配置与升级路径不移动；
+  且只比较 config 哈希，不含 `node.params`。规避：需要时手动运行
+  `DSH backup` 并确认标记位置。
+- **M9** `write_node_params` 直接截断重写，不是原子写，失败会留半截文件。
+  规避：改动前先 `DSH backup`。
+- **M13** 卸载不删 HY2 的 journald drop-in，200M 日志上限残留。规避：卸载后
+  检查 `/etc/systemd/journald.conf.d/`。
+- **M14** `diagnose.sh` 不覆盖 HY2，HY2 坏了也可能报 OK。规避：HY2 用
+  `DSH hy2 status` / `logs` 单独查。
+- 其余 33 个低优先项（见 1.4.9 交接文档）。
+
 ## 1.4.9 — 2026-11-16
 
 基线：1.4.8（tag `v1.4.8`，源码提交 `0cc2459`）。按 1.4.9 修改文档修
@@ -64,7 +112,7 @@
   `t_rollback_protects_target`、`t_restore_dropin`、`t_host_validation`、
   `t_sni_params_atomic`、`t_uninstall_aborts_without_snapshot`、
   `t_hy2_preflight_own_port`。
-- 全量：96 passed / 0 failed / 1 skipped（`t_archive_xray`，本机缺 `zip`）。
+- 全量：96 passed / 0 failed / 1 skipped。
   与 1.4.8 的 86/0/1 对照：新增 10 项，全部有对应用例。
 - 测试模式不再跳过 HY2 端口归属判断（H5）；仍无法在沙箱模拟的两条（真实
   sshd 重启、真实 HY2 升级）由真机验收覆盖。
