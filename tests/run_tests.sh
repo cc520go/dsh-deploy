@@ -2648,6 +2648,18 @@ t_rollback_protects_target() {
     [[ -n "${target}" && -d "${target}" ]] || return 1
     rollback_core "${target}" >/dev/null 2>&1 || return 1
     [[ -d "${target}" ]] || return 1
+    # CLI users pass the path WITHOUT a trailing slash: that form must be
+    # protected too (snapshot_list emits slashes; comparison must normalize).
+    local i2
+    for i2 in 1 2 3 4; do
+        snapshot_create >/dev/null 2>&1 || return 1
+        sleep 1
+    done
+    local target2
+    target2="$(snapshot_list | tail -1)"
+    target2="${target2%/}"
+    rollback_core "${target2}" >/dev/null 2>&1 || return 1
+    [[ -d "${target2}" ]] || return 1
     return 0
 }
 
@@ -2745,6 +2757,10 @@ t_hy2_preflight_own_port() {
     mkdir -p "${d}"
     export HY2_CONF_DIR="${d}" HY2_MARKER="${d}/.managed-by-hy2addon"
     : > "${HY2_MARKER}"
+    # The production detector must not parse a fixed ss column (it differed
+    # across ss versions and silently missed an occupied port).
+    if grep -q "ss -lun 2>/dev/null | awk" "${REPO_ROOT}/lib/hy2.sh"; then return 1; fi
+    grep -q 'ss -ulpn 2>/dev/null | grep -qE' "${REPO_ROOT}/lib/hy2.sh" || return 1
     XRAY_TEST_HY2_PORT_OWNER=self hy2_preflight >/dev/null 2>&1 || return 1
     expect_fail env XRAY_TEST_HY2_PORT_OWNER=other hy2_preflight || return 1
     XRAY_TEST_HY2_PORT_OWNER=none hy2_preflight >/dev/null 2>&1 || return 1

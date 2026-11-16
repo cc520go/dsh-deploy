@@ -134,7 +134,10 @@ hy2_preflight() {
             self) : ;;
             other) die "UDP ${HY2_PORT} 已被占用（不是 HY2 自己的服务时就别继续）。先查: ss -ulpn | grep :${HY2_PORT}"; return 1 ;;
         esac
-    elif ss -lun 2>/dev/null | awk '{print $5}' | grep -qE "[:.]${HY2_PORT}\$"; then
+    elif ss -ulpn 2>/dev/null | grep -qE "[:.]${HY2_PORT}[[:space:]]"; then
+        # Do not parse a fixed column: ss versions differ in whether the
+        # Netid column is repeated per line (awk $5 pointed at the peer
+        # address on Debian 12, so an occupied port was never detected).
         if ! hy2_listening; then
             die "UDP ${HY2_PORT} 已被其他进程占用（不是 HY2 自己的服务时就别继续）。先查: ss -ulpn | grep :${HY2_PORT}"; return 1
         fi

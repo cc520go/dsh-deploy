@@ -47,6 +47,16 @@
   恢复正常；`maybe_install_hy2` 的 `[y/N]` 在 stdin 不是终端时改为跳过提示
   （不再无限阻塞）。
 
+### 真机复测追加修复
+
+- **H3 尾斜杠**：`snapshot_list` 输出带尾斜杠，而 CLI 传进来的目标路径没有，
+  字符串比较不相等导致 `SNAPSHOT_PROTECT` 失效——真机上仍然删掉了回滚目标。
+  现在比较前统一去掉尾部 `/`，真机复测：`retaining protected snapshot during
+  prune` + `rollback complete`，目标存活。
+- **H5 端口检测列号**：原来的 `ss -lun | awk '{print $5}'` 在 Debian 12 上取到的
+  是对端地址，端口占用从未被检测到；改为直接匹配 `ss -ulpn` 的端口行再判进程
+  归属。真机双向验证：HY2 自占时放行并升级成功，其他进程占 UDP 443 时明确拒绝。
+
 ### 测试
 
 - 新增回归：`t_prompt_with_default`、`t_install_version_requires_upgrade`、

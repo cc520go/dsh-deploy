@@ -252,8 +252,11 @@ snapshot_prune() {
         # A caller that is about to restore a specific snapshot sets
         # SNAPSHOT_PROTECT: taking the pre-change snapshot must not prune the
         # very snapshot the rollback is going to restore (1.4.8 self-destruct).
-        if [[ -n "${protect}" && "${dir}" == "${protect}" ]]; then
-            log_info "retaining protected snapshot during prune: ${dir}"
+        # snapshot_list emits paths WITH a trailing slash, while callers pass
+        # the plain path; compare normalized forms or the protection silently
+        # fails and the rollback target is pruned (1.4.9 real-machine finding).
+        if [[ -n "${protect}" && "${dir%/}" == "${protect%/}" ]]; then
+            log_info "retaining protected snapshot during prune: ${dir%/}"
             continue
         fi
         count=$((count + 1))
