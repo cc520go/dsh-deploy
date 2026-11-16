@@ -1,0 +1,94 @@
+name: Publish release
+
+# One-shot release helper: pushing a release/** branch creates the GitHub
+# Release for the version in release-assets/RELEASE-TAG and uploads the
+# signed assets committed on that branch. Uses the repository's own
+# GITHUB_TOKEN, so no personal API token is needed.
+#
+# The chain of trust is NOT optional here (1.4.8's per-version workflow had
+# it; this template must match it):
+#   1. the tag must already be pushed and must point at the built commit
+#   2. SHA256SUMS must verify every asset
+#   3. SHA256SUMS.asc must verify against the pinned release fingerprint
+#   4. rebuilding the tarball from the tag must be byte-identical
+# Only then is the Release created. See tools/release/README.md.
+
+on:
+  push:
+    branches: [release/**]
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Read and verify the release tag
+        # `gh release create <tag>` would happily create the tag on the pushed
+        # branch commit; that reproduces the 1.4.7 SOURCE_DATE_EPOCH mismatch.
+        # Require the tag to exist already, so it points at the built commit.
+        run: |
+          set -euo pipefail
+          tag="$(tr -d '[:space:]' < release-assets/RELEASE-TAG)"
+          test -n "${tag}"
+          git fetch --tags --force
+          if ! git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            echo "::error::tag ${tag} is not pushed. Push the tag first (it must point at the commit the assets were built from)."
+            exit 1
+          fi
+          echo "tag ${tag} -> $(git rev-parse "${tag}^{commit}")"
+
+      - name: Verify signed assets
+        run: |
+          set -euo pipefail
+          cd release-assets
+          sha256sum -c SHA256SUMS
+          export GNUPGHOME="$(mktemp -d)"
+          chmod 700 "${GNUPGHOME}"
+          gpg --batch --import dsh-signing-key.asc
+          fpr="$(gpg --with-colons --fingerprint 2>/dev/null | awk -F: '/^fpr:/{print $10; exit}')"
+          if [[ "${fpr}" != "8E25C6FC8FA01719137FAAE6BC9AF5236E467872" ]]; then
+            echo "::error::unexpected signing key fingerprint: ${fpr}"
+            exit 1
+          fi
+          gpg --verify SHA256SUMS.asc SHA256SUMS
+          grep -q '  smoke-remote.sh$' SHA256SUMS
+
+      - name: Verify the tarball reproduces from the tag
+        run: |
+          set -euo pipefail
+          tag="$(tr -d '[:space:]' < release-assets/RELEASE-TAG)"
+          ver="${tag#v}"
+          sha="$(git rev-parse "${tag}^{commit}")"
+          git worktree add /tmp/tagbuild "${sha}"
+          ( cd /tmp/tagbuild && bash tools/build-release.sh --no-sign >/dev/null )
+          if ! cmp "/tmp/tagbuild/dist/dsh-${ver}.tar.gz" "release-assets/dsh-${ver}.tar.gz"; then
+            echo "::error::tarball built from tag ${tag} does not match the released file (tag is not the built commit?)"
+            exit 1
+          fi
+          echo "tag build reproduces the released tarball"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$(tr -d '[:space:]' < release-assets/RELEASE-TAG)"
+          test -n "${tag}"
+          gh release create "${tag}" \
+            --title "DSH ${tag#v}「鲸潮」" \
+            --notes-file release-assets/RELEASE-NOTES.md \
+            --latest \
+            "release-assets/dsh-install-${tag#v}.sh" \
+            "release-assets/dsh-${tag#v}.tar.gz" \
+            release-assets/dsh-install.sh \
+            release-assets/lisa-install.sh \
+            release-assets/SHA256SUMS \
+            release-assets/SHA256SUMS.asc \
+            release-assets/dsh-signing-key.asc \
+            release-assets/smoke-remote.sh
