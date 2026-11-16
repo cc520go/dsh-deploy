@@ -13,7 +13,7 @@
 # 关键：tag 要打在“被构建的源码提交”上。构建用的是 HEAD 的提交时间
 # （SOURCE_DATE_EPOCH），tag 若打在后面加了 dist/ 的发布提交上，外部按 tag
 # 构建会得到不同的哈希（1.4.7 踩过）。
-ver=1.4.8
+ver=1.4.9
 git checkout -b "release/v${ver}"
 mkdir -p release-assets
 cp dist/dsh-install-${ver}.sh dist/dsh-${ver}.tar.gz \
@@ -33,7 +33,7 @@ GIT_SSH_COMMAND="ssh -i ${GIT_DEPLOY_KEY:?请设置 deploy key 路径} -o Identi
 ```bash
 curl -fsSL 'https://api.github.com/repos/cc520go/dsh-deploy/actions/runs?per_page=5' \
   | python3 -c 'import json,sys; [print(r["name"], r["status"], r["conclusion"]) for r in json.load(sys.stdin)["workflow_runs"]]'
-curl -fsSL 'https://api.github.com/repos/cc520go/dsh-deploy/releases/tags/v1.4.8' \
+curl -fsSL 'https://api.github.com/repos/cc520go/dsh-deploy/releases/tags/v1.4.9' \
   | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["name"], d["draft"], [a["name"] for a in d["assets"]])'
 ```
 

@@ -242,11 +242,18 @@ snapshot_mark_verified_current() {
 # SNAPSHOT_PARENT whose basename starts with "xray-backup-".
 snapshot_prune() {
     local -a all
-    local dir base count=0
+    local dir base count=0 protect="${SNAPSHOT_PROTECT:-}"
     mapfile -t all < <(snapshot_list)
     for dir in "${all[@]}"; do
         # Marked snapshots never consume a keep slot and are never pruned.
         if [[ -f "${dir}/known-good" ]]; then
+            continue
+        fi
+        # A caller that is about to restore a specific snapshot sets
+        # SNAPSHOT_PROTECT: taking the pre-change snapshot must not prune the
+        # very snapshot the rollback is going to restore (1.4.8 self-destruct).
+        if [[ -n "${protect}" && "${dir}" == "${protect}" ]]; then
+            log_info "retaining protected snapshot during prune: ${dir}"
             continue
         fi
         count=$((count + 1))
@@ -411,9 +418,22 @@ snapshot_restore() {
             cp -a "${snap}/xray@.service" "${XRAY_UNIT_DIR}/xray@.service" \
                 || { die "restore: failed to restore xray@.service"; return 1; }
         fi
+        # Restore the drop-in CONTENTS, not the directory itself: cp of a
+        # directory onto an existing one nests it (xray.service.d/xray.service.d)
+        # and leaves stale drop-ins in place. Clear first, then copy.
         if [[ -d "${snap}/xray.service.d" ]]; then
-            cp -a "${snap}/xray.service.d" "${XRAY_UNIT_DIR}/xray.service.d" \
+            mkdir -p "${XRAY_UNIT_DIR}/xray.service.d" \
+                || { die "restore: cannot create xray.service.d"; return 1; }
+            find "${XRAY_UNIT_DIR}/xray.service.d" -mindepth 1 -delete \
+                || { die "restore: cannot clear xray.service.d"; return 1; }
+            cp -a "${snap}/xray.service.d/." "${XRAY_UNIT_DIR}/xray.service.d/" \
                 || { die "restore: failed to restore xray.service.d"; return 1; }
+            log_info "restored systemd drop-ins from ${snap}"
+        elif [[ -d "${XRAY_UNIT_DIR}/xray.service.d" ]]; then
+            # The snapshot has no drop-ins: the restored state has none either.
+            find "${XRAY_UNIT_DIR}/xray.service.d" -mindepth 1 -delete \
+                || { die "restore: cannot clear stale xray.service.d"; return 1; }
+            log_info "removed live systemd drop-ins absent from the snapshot"
         fi
         if [[ -d "${snap}/share-xray" ]]; then
             cp -a --remove-destination "${snap}/share-xray/." "${XRAY_SHARE_DIR}/" \

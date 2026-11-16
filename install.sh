@@ -321,7 +321,10 @@ env_check() {
 # prompt_with_default <prompt> <default>: reads a line; empty means default.
 prompt_with_default() {
     local prompt="$1" default="$2" ans
-    printf '%s [%s]: ' "${prompt}" "${default}"
+    # The prompt goes to stderr: callers use $(prompt_with_default ...), so
+    # writing it to stdout captured the prompt text into the value and broke
+    # every interactive install (1.4.8 regression).
+    printf '%s [%s]: ' "${prompt}" "${default}" >&2
     read -r ans || ans=""
     if [[ -z "${ans}" ]]; then
         printf '%s' "${default}"
@@ -622,6 +625,12 @@ node_setup() {
     priv="${keys%% *}"
     pub="${keys##* }"
     shortid="$(gen_shortid)" || return 1
+    # One validation point for all three host sources (prompt, env override,
+    # reused params): a bad host must fail here, not produce a dead link.
+    validate_host "${host}" || {
+        die "invalid server address '${host}': use a valid IPv4 (0-255 per octet) or a domain name."
+        return 1
+    }
     masked_summary "${host}" "${port}" "${flow}" "${sni}" "${dest}"
     if [[ "${AUTO_INSTALL}" != "1" ]]; then
         confirm "Impact: a new node config will be written to ${XRAY_CONF} and the service will start." || { log_info "node setup cancelled."; return 1; }
@@ -927,6 +936,10 @@ maybe_install_hy2() {
         if [[ "${AUTO_INSTALL}" == "1" ]]; then
             return 0
         fi
+        if [[ ! -t 0 ]]; then
+            log_info "non-interactive session: skipping the HY2 prompt (pass --with-hy2 to install it)."
+            return 0
+        fi
         printf '是否同时安装 Hysteria2 附加协议（UDP 443，通话备用）？[y/N]: '
         read -r ans || ans=""
         case "${ans}" in
@@ -987,7 +1000,7 @@ EOF
 }
 
 main() {
-    local check_only=0 version=""
+    local check_only=0 version="" version_arg=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --help|-h) usage; return 0 ;;
@@ -995,7 +1008,7 @@ main() {
             --auto) AUTO_INSTALL=1; shift ;;
             --repair) REPAIR_INSTALL=1; shift ;;
             --with-hy2) WITH_HY2=1; shift ;;
-            *) version="$1"; shift ;;
+            *) version="$1"; version_arg="$1"; shift ;;
         esac
     done
     require_root || return 1
@@ -1010,6 +1023,12 @@ main() {
     fi
     version="$(normalize_version "${version}")" || return 1
     if [[ -x "${XRAY_BIN}" ]]; then
+        # This script installs/repairs; it does NOT upgrade. Silently dropping
+        # a requested version made "install state OK" mean "still the old one".
+        if [[ -n "${version_arg}" && "${version}" != "$(current_version)" ]]; then
+            die "install.sh does not upgrade the core: requested ${version}, installed $(current_version). Use 'DSH' menu 4 or 'DSH upgrade ${version}'. Nothing was changed."
+            return 1
+        fi
         handle_already_installed
         return $?
     fi

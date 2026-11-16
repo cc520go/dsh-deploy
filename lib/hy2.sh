@@ -126,10 +126,21 @@ hy2_preflight() {
         return 1
     fi
 
-    if [[ "${XRAY_TEST_MODE:-0}" != "1" ]]; then
-        if ss -lun 2>/dev/null | awk '{print $5}' | grep -qE "[:.]${HY2_PORT}\$"; then
-            die "UDP ${HY2_PORT} 已被占用（不是 HY2 自己的服务时就别继续）。先查: ss -ulpn | grep :${HY2_PORT}"; return 1
+    # UDP port check: an upgrade runs while HY2 already owns the port, so a
+    # listener is only a blocker when it is NOT hysteria. Test mode exercises
+    # the same decision through XRAY_TEST_HY2_PORT_OWNER (self|other|none).
+    if [[ "${XRAY_TEST_MODE:-0}" == "1" ]]; then
+        case "${XRAY_TEST_HY2_PORT_OWNER:-none}" in
+            self) : ;;
+            other) die "UDP ${HY2_PORT} 已被占用（不是 HY2 自己的服务时就别继续）。先查: ss -ulpn | grep :${HY2_PORT}"; return 1 ;;
+        esac
+    elif ss -lun 2>/dev/null | awk '{print $5}' | grep -qE "[:.]${HY2_PORT}\$"; then
+        if ! hy2_listening; then
+            die "UDP ${HY2_PORT} 已被其他进程占用（不是 HY2 自己的服务时就别继续）。先查: ss -ulpn | grep :${HY2_PORT}"; return 1
         fi
+        log_info "UDP ${HY2_PORT} 由 HY2 自己监听（升级路径继续）。"
+    fi
+    if [[ "${XRAY_TEST_MODE:-0}" != "1" ]]; then
         if id -u "${HY2_USER}" >/dev/null 2>&1 && ! hy2_marker_present; then
             die "系统里已有用户 ${HY2_USER}，但本项目没有标记文件。为免踩到别人的安装，拒绝继续。"; return 1
         fi

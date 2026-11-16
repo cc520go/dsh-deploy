@@ -257,6 +257,9 @@ abort_node_change() {
 apply_node_config() {
     local tmpconf="$1" label="${2:-node config}" snap
     snap="$(snapshot_create)" || return 1
+    # Exposed so a caller whose follow-up step fails (e.g. writing params)
+    # can roll the already-switched config back to this snapshot.
+    APPLY_NODE_SNAPSHOT="${snap}"
     service_stop || true
     cp -a "${tmpconf}" "${XRAY_CONF}" || {
         log_error "failed to install ${label}; restoring snapshot."
@@ -407,9 +410,34 @@ node_set_sni() {
     # snapshots, installs, live-tests, and restarts, restoring the snapshot
     # automatically on any failure after the install. Params are written
     # only after a successful switch.
-    apply_node_config "${tmpconf}" "SNI change" || { rm -rf -- "${tmpdir}"; return 1; }
+    # Write params to a temp file first, switch, then rename: if the rename
+    # fails the live config is rolled back, so params and config never end up
+    # one-new-one-old (which used to produce a dead share link).
+    local params_tmp="${NODE_PARAMS_FILE}.new.$$"
+    if ! ( export NODE_PARAMS_FILE="${params_tmp}"; \
+           write_node_params "${uuid}" "${priv}" "${pub}" "${sid}" "${host}" "${port}" "${new_sni}" "${dest}" "${flow}" ); then
+        rm -rf -- "${tmpdir}"; rm -f -- "${params_tmp}"
+        die "SNI change aborted: could not prepare node.params; live config untouched."
+        return 1
+    fi
+    if ! apply_node_config "${tmpconf}" "SNI change"; then
+        rm -rf -- "${tmpdir}"; rm -f -- "${params_tmp}"
+        return 1
+    fi
     rm -rf -- "${tmpdir}"
-    write_node_params "${uuid}" "${priv}" "${pub}" "${sid}" "${host}" "${port}" "${new_sni}" "${dest}" "${flow}" || return 1
+    # Failure injection for the regression test (test mode only, like the
+    # other XRAY_TEST_* hooks): a failed params rename must roll the already
+    # switched config back.
+    if [[ "${XRAY_TEST_MODE:-0}" == "1" && "${XRAY_TEST_PARAMS_RENAME_FAIL:-0}" == "1" ]]; then
+        rm -f -- "${params_tmp}"
+        abort_node_change "node.params write failed (injected)" "${APPLY_NODE_SNAPSHOT}"
+        return 1
+    fi
+    if ! mv -f -- "${params_tmp}" "${NODE_PARAMS_FILE}"; then
+        rm -f -- "${params_tmp}"
+        abort_node_change "node.params write failed" "${APPLY_NODE_SNAPSHOT}"
+        return 1
+    fi
     log_info "SNI changed to ${new_sni}."
     masked_summary "${host}" "${port}" "${flow}" "${new_sni}" "${dest}"
     node_share
@@ -781,6 +809,11 @@ cmd_auth() {
         set_sshd_value "${tf}" "PermitRootLogin" "prohibit-password"
     done
     if [[ "${XRAY_TEST_MODE:-0}" == "1" ]]; then
+        if [[ "${XRAY_TEST_SSHD_RESTART:-ok}" != "ok" ]]; then
+            log_error "sshd restart FAILED (test hook): the daemon was not confirmed running; password login may be closed. Not reporting success."
+            _sshd_restore_all "${bak_main}" "${bak_list}" || log_error "restoring sshd backups also failed."
+            return 1
+        fi
         printf '测试模式：不碰真实 sshd，不重启。已模拟 sshd -t 通过、sshd -T 复核 password no。\n'
         printf '更改完成（测试模式）：密码已关闭（模拟），只留密钥登录。\n'
         printf '请先在新会话里测通密钥登录，不要关掉当前会话。\n'
@@ -808,10 +841,24 @@ cmd_auth() {
         fi
         return 1
     fi
+    # A restart that fails leaves the daemon down while the config on disk says
+    # "password no": never report success without confirming the daemon runs.
+    local restart_ok=1
     if command -v systemctl >/dev/null 2>&1; then
-        systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true
+        if systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null; then
+            if ! systemctl is-active --quiet ssh 2>/dev/null && ! systemctl is-active --quiet sshd 2>/dev/null; then
+                restart_ok=0
+            fi
+        else
+            restart_ok=0
+        fi
     else
-        service ssh restart 2>/dev/null || service sshd restart 2>/dev/null || true
+        service ssh restart 2>/dev/null || service sshd restart 2>/dev/null || restart_ok=0
+    fi
+    if [[ "${restart_ok}" -ne 1 ]]; then
+        log_error "sshd restart FAILED / daemon not active: the config says password login is closed but the daemon was NOT confirmed running. Restoring backups; do not close this session."
+        _sshd_restore_all "${bak_main}" "${bak_list}" || log_error "restoring sshd backups also failed; check /etc/ssh manually."
+        return 1
     fi
     printf '重启后 sshd -T 复核：\n'
     sshd -T 2>/dev/null | grep -iE '^(passwordauthentication|pubkeyauthentication|permitrootlogin|kbdinteractiveauthentication) ' || true
@@ -927,7 +974,12 @@ cmd_uninstall() {
                 ;;
         esac
     fi
-    snapshot_create >/dev/null || true
+    # The confirmation above promises a snapshot. If it cannot be taken, the
+    # uninstall would destroy the only recovery path: stop instead of going on.
+    if ! snapshot_create >/dev/null; then
+        log_error "pre-uninstall snapshot FAILED (disk full / not writable); aborting uninstall — nothing was removed."
+        return 1
+    fi
 
     # 1) HY2 first. --yes: menu 21 already confirmed the whole uninstall.
     # --keep-snapshots: menu 21 keeps every snapshot on purpose, and a
@@ -1136,6 +1188,9 @@ menu() {
     done
 }
 main() {
+    # One entry check for every subcommand (install.sh and lib/hy2.sh already
+    # do this): a non-root run must be refused before it changes anything.
+    require_root || return 1
     local cmd="${1:-menu}"
     shift || true
     case "${cmd}" in

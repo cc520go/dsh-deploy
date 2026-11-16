@@ -187,6 +187,25 @@ EOF
     return 0
 }
 
+# validate_host <host>: a share-link host must be a valid IPv4 address
+# (each octet 0-255) or a DNS name. A typo here produces a link that can never
+# connect while the installer still says "installed", so it is checked once
+# for every source (interactive, env override, reused params).
+validate_host() {
+    local h="${1:-}"
+    [[ -n "${h}" && "${#h}" -le 253 ]] || return 1
+    if [[ "${h}" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]]; then
+        local o
+        for o in "${BASH_REMATCH[@]:1}"; do
+            [[ "${o}" -le 255 ]] || return 1
+        done
+        return 0
+    fi
+    [[ "${h}" == *.* ]] || return 1
+    [[ "${h}" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\.[A-Za-z]{2,63}$ ]] || return 1
+    return 0
+}
+
 # config_test <file>: runs `xray run -test`. On failure prints the tail
 # of the output plus recovery steps and returns 1. Never restarts on
 # a failed test — callers must honour the return code.

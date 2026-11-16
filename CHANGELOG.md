@@ -2,6 +2,63 @@
 
 记录 DSH 脚本自身的版本；Xray 核心版本见 `VERSION`。
 
+## 1.4.9 — 2026-11-16
+
+基线：1.4.8（tag `v1.4.8`，源码提交 `0cc2459`）。按 1.4.9 修改文档修
+6 高 + 4 中 + 1 个 1.4.8 回归，共 11 项。
+
+### 高
+
+- **H1 已装机器的版本参数被静默丢弃**：`install.sh` 收到与当前不同的版本参数
+  时直接报错并指向 `DSH upgrade`（退出码非零），相同版本仍走原有的保留/修复
+  路径，不再打印 “install state OK” 骗人。
+- **H2 sshd 重启失败被吞**：`DSH auth` 关闭密码后必须确认 sshd 真的在运行
+  （`systemctl is-active`），失败则恢复备份、明确报错，不打印“更改完成”、
+  不启动回滚定时器。测试模式用 `XRAY_TEST_SSHD_RESTART=fail` 覆盖失败路径。
+- **H3 回滚会删掉回滚目标**：拍 pre 快照前用 `SNAPSHOT_PROTECT` 保护点名快照，
+  `snapshot_prune` 跳过它；4 个未标记快照时回滚最旧的那个不再自毁。
+- **H4 drop-in 恢复路径写错**：改为恢复目录内容（先清空目标目录），不再产生
+  `xray.service.d/xray.service.d/` 嵌套，也不再保留快照里没有的旧 drop-in；
+  `verify_restored_state` 增加 unit 摘要校验，恢复后单元必须与快照一致。
+- **H5 HY2 升级被自己占的 UDP 443 挡死**：preflight 改用进程归属判断
+  （`hy2_listening`），HY2 自己监听时放行升级，其他进程占用仍拒绝；测试模式
+  用 `XRAY_TEST_HY2_PORT_OWNER=self|other|none` 覆盖同一判断。
+- **H6 新发布流程零校验**：`tools/release/publish-release.yml` 补齐
+  `sha256sum -c`、GPG 指纹与验签、tag 必须已推送且按 tag 重建逐字节比对、
+  checkout 钉 commit SHA；README 与 CHANGELOG 的说法与代码一致。
+
+### 中
+
+- **M1 host 从不校验**：新增 `validate_host`（IPv4 每段 0–255 或合法域名），
+  在交互输入、`XRAY_NODE_HOST`、复用 params 三条来源汇合后统一校验，坏 host
+  装到一半就停下，不再打印死链。
+- **M2 改 SNI 后写 params 失败导致分叉**：params 先写临时文件，切换成功后再
+  原子改名；改名失败调用 `abort_node_change` 把已切换的配置回滚，配置与
+  params 不再一新一旧。测试用 `XRAY_TEST_PARAMS_RENAME_FAIL=1` 注入失败。
+- **M3 卸载前快照失败被吞**：快照拍不成（磁盘满/不可写）直接中止卸载并明说
+  没有删除任何东西，不再静默销毁唯一恢复手段。
+- **M4 manage.sh 无 root 入口校验**：`main()` 入口统一 `require_root`，非 root
+  在改动任何文件前就被拒绝。
+
+### 1.4.8 回归
+
+- **交互式安装必死**：`prompt_with_default` 的提示打到 stdout，被
+  `$(...)` 捕获进变量值（`port=Port [443]: 443`）。提示改走 stderr，交互安装
+  恢复正常；`maybe_install_hy2` 的 `[y/N]` 在 stdin 不是终端时改为跳过提示
+  （不再无限阻塞）。
+
+### 测试
+
+- 新增回归：`t_prompt_with_default`、`t_install_version_requires_upgrade`、
+  `t_auth_requires_sshd_restart`、`t_manage_requires_root`、
+  `t_rollback_protects_target`、`t_restore_dropin`、`t_host_validation`、
+  `t_sni_params_atomic`、`t_uninstall_aborts_without_snapshot`、
+  `t_hy2_preflight_own_port`。
+- 全量：96 passed / 0 failed / 1 skipped（`t_archive_xray`，本机缺 `zip`）。
+  与 1.4.8 的 86/0/1 对照：新增 10 项，全部有对应用例。
+- 测试模式不再跳过 HY2 端口归属判断（H5）；仍无法在沙箱模拟的两条（真实
+  sshd 重启、真实 HY2 升级）由真机验收覆盖。
+
 ## 1.4.8 — 2026-11-16
 
 基线：1.4.7。按“发版前自查清单”逐项自查时发现并修复。

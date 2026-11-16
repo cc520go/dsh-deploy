@@ -48,6 +48,15 @@ verify_restored_state() {
         log_error "restore verification: live version is ${cur_ver}, snapshot recorded ${snap_ver}"
         return 1
     fi
+    local u_meta live_units
+    u_meta="$(awk -F= '$1=="units_sha256"{print $2; exit}' "${snap}/meta.txt" 2>/dev/null | tr -d '\r')"
+    if [[ -n "${u_meta}" && "${u_meta}" != "none" ]]; then
+        live_units="$(_snapshot_payload_digest "${XRAY_UNIT_DIR}" xray.service xray@.service xray.service.d)"
+        if [[ "${live_units}" != "${u_meta}" ]]; then
+            log_error "restore verification: restored systemd units do not match the snapshot"
+            return 1
+        fi
+    fi
     port="$(read_node_param port 2>/dev/null || true)"
     if [[ -z "${port}" ]]; then
         log_error "restore verification: node port unknown (node.params missing)"
@@ -215,7 +224,10 @@ rollback_core() {
     cur="$(current_version)"
     confirm "Impact: the xray service will restart and the core will roll back from ${cur} to snapshot ${snap} (version ${snap_ver:-unknown}), including its config and units." || { log_info "rollback cancelled."; return 1; }
     local pre
-    pre="$(snapshot_create)" || return 1
+    # Protect the target from the prune that snapshot_create runs: otherwise a
+    # pre-snapshot can push an older target out of the keep window and delete
+    # the snapshot we are about to restore.
+    pre="$(SNAPSHOT_PROTECT="${snap}" snapshot_create)" || return 1
     service_stop || log_warn "stop reported an error; continuing (service may already be stopped)."
     if ! snapshot_restore "${snap}" full; then
         log_error "snapshot restore failed; attempting to restore the pre-rollback snapshot."

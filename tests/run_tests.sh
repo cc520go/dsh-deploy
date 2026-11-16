@@ -2546,6 +2546,212 @@ t_install_preserve_requires_params() {
 }
 
 
+t_prompt_with_default() {
+    # The prompt must go to stderr: callers capture the value with $(...).
+    # shellcheck disable=SC1091
+    source "${REPO_ROOT}/install.sh"
+    local out
+    out="$(printf '8443\n' | prompt_with_default "Port" "443" 2>/dev/null)"
+    [[ "${out}" == "8443" ]] || return 1
+    out="$(printf '\n' | prompt_with_default "Port" "443" 2>/dev/null)"
+    [[ "${out}" == "443" ]] || return 1
+    return 0
+}
+
+t_install_version_requires_upgrade() {
+    # An installed machine must not accept a different version and report OK.
+    # shellcheck disable=SC1091
+    source "${REPO_ROOT}/install.sh"
+    export LOGROTATE_DIR="${SANDBOX}/logrotate.d"
+    mkdir -p "${LOGROTATE_DIR}"
+    export AUTO_INSTALL=1 XRAY_TEST_LISTEN_PORTS=""
+    local cur out rc
+    cur="$(current_version)"
+    [[ -n "${cur}" ]] || return 1
+    out="$(main "26.99.99" 2>&1)" && rc=0 || rc=$?
+    [[ "${rc}" -ne 0 ]] || return 1
+    printf '%s' "${out}" | grep -q 'does not upgrade' || return 1
+    printf '%s' "${out}" | grep -q 'install state OK' && return 1
+    return 0
+}
+
+t_auth_requires_sshd_restart() {
+    # A failed restart must not be reported as "完成": the daemon may be down.
+    # shellcheck disable=SC1091
+    source "${REPO_ROOT}/manage.sh"
+    local d="${SANDBOX}/auth-restart"
+    mkdir -p "${d}/sshd_config.d"
+    printf 'PasswordAuthentication yes\n' > "${d}/sshd_config"
+    printf 'PasswordAuthentication yes\n' > "${d}/sshd_config.d/10-x.conf"
+    : > "${d}/authorized_keys"
+    export XRAY_TEST_SSHD_CONFIG="${d}/sshd_config" \
+           XRAY_TEST_SSHD_DIR="${d}/sshd_config.d" \
+           XRAY_TEST_AUTH_KEYS="${d}/authorized_keys" \
+           XRAY_TEST_AUTH_STATE="${d}/auth.state"
+    local key="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILZv0SN+k8sS2P0tc/+vyt3FYh8wQefXeDavOG/hOtXh test@example"
+    local out rc
+    out="$(printf '%s\nyes\n' "${key}" | XRAY_TEST_SSHD_RESTART=fail cmd_auth 2>&1)" && rc=0 || rc=$?
+    [[ "${rc}" -ne 0 ]] || return 1
+    printf '%s' "${out}" | grep -q 'restart FAILED' || return 1
+    printf '%s' "${out}" | grep -q '更改完成' && return 1
+    # The success path must still work with the default hook.
+    out="$(printf '%s\nyes\n' "${key}" | cmd_auth 2>&1)" || return 1
+    printf '%s' "${out}" | grep -q '更改完成' || return 1
+    return 0
+}
+
+t_manage_requires_root() {
+    # Any manage.sh subcommand must be refused at the entry when not root.
+    local d="${SANDBOX}/mroot"
+    mkdir -p "${d}"
+    cp -a "${REPO_ROOT}/manage.sh" "${d}/manage.sh"
+    cp -a "${REPO_ROOT}/lib" "${d}/lib"
+    cp -a "${REPO_ROOT}/DSH_VERSION" "${REPO_ROOT}/VERSION" "${REPO_ROOT}/DSH_CODENAME" "${d}/" 2>/dev/null || true
+    chmod -R a+rX "${d}"
+    local run=""
+    if command -v setpriv >/dev/null 2>&1; then
+        run="setpriv --reuid=65534 --regid=65534 --clear-groups"
+    elif command -v su >/dev/null 2>&1 && id nobody >/dev/null 2>&1; then
+        run="su -s /bin/sh nobody -c"
+    else
+        return 77
+    fi
+    local out rc
+    if [[ "${run}" == "su -s /bin/sh nobody -c" ]]; then
+        out="$(su -s /bin/sh nobody -c "bash '${d}/manage.sh' help" 2>&1)" && rc=0 || rc=$?
+    else
+        out="$(${run} bash "${d}/manage.sh" help 2>&1)" && rc=0 || rc=$?
+    fi
+    [[ "${rc}" -ne 0 ]] || return 1
+    printf '%s' "${out}" | grep -qi 'root' || return 1
+    return 0
+}
+
+
+t_rollback_protects_target() {
+    # Taking the pre-rollback snapshot must not prune the snapshot we are
+    # about to restore (1.4.8 self-destruct on older snapshots).
+    source "${REPO_ROOT}/lib/service.sh"
+    export XRAY_TEST_LISTEN_PORTS="443"
+    render_config "PLACEHOLDER-UUID" "PLACEHOLDER-SID" "PLACEHOLDER-PRIVATE-KEY" \
+        "sni.example" "443" "vision" "www.apple.com:443" "${XRAY_CONF}" || return 1
+    write_node_params "PLACEHOLDER-UUID" "TESTPRIVKEYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" \
+        "TESTPUBKEYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" "aabbccdd" \
+        "203.0.113.9" "443" "sni.example" "www.apple.com:443" "vision" || return 1
+    local i
+    for i in 1 2 3 4; do
+        snapshot_create >/dev/null 2>&1 || return 1
+        sleep 1
+    done
+    local target
+    target="$(snapshot_list | tail -1)"
+    [[ -n "${target}" && -d "${target}" ]] || return 1
+    rollback_core "${target}" >/dev/null 2>&1 || return 1
+    [[ -d "${target}" ]] || return 1
+    return 0
+}
+
+t_restore_dropin() {
+    # Drop-ins must be restored as CONTENTS (no nested dir) and stale live
+    # drop-ins absent from the snapshot must be removed.
+    source "${REPO_ROOT}/lib/backup.sh"
+    mkdir -p "${XRAY_UNIT_DIR}/xray.service.d"
+    printf '# A\n' > "${XRAY_UNIT_DIR}/xray.service.d/10-a.conf"
+    render_config "PLACEHOLDER-UUID" "PLACEHOLDER-SID" "PLACEHOLDER-PRIVATE-KEY" \
+        "sni.example" "443" "vision" "www.apple.com:443" "${XRAY_CONF}" || return 1
+    local snap
+    snap="$(snapshot_create)" || return 1
+    rm -f "${XRAY_UNIT_DIR}/xray.service.d/10-a.conf"
+    printf '# B\n' > "${XRAY_UNIT_DIR}/xray.service.d/99-stale.conf"
+    snapshot_restore "${snap}" full >/dev/null 2>&1 || return 1
+    [[ -f "${XRAY_UNIT_DIR}/xray.service.d/10-a.conf" ]] || return 1
+    [[ -f "${XRAY_UNIT_DIR}/xray.service.d/99-stale.conf" ]] && return 1
+    [[ -d "${XRAY_UNIT_DIR}/xray.service.d/xray.service.d" ]] && return 1
+    # A snapshot with no drop-ins restores to "no drop-ins".
+    rm -rf "${XRAY_UNIT_DIR}/xray.service.d"
+    snap="$(snapshot_create)" || return 1
+    mkdir -p "${XRAY_UNIT_DIR}/xray.service.d"
+    printf '# C\n' > "${XRAY_UNIT_DIR}/xray.service.d/50-c.conf"
+    snapshot_restore "${snap}" full >/dev/null 2>&1 || return 1
+    [[ -f "${XRAY_UNIT_DIR}/xray.service.d/50-c.conf" ]] && return 1
+    return 0
+}
+
+t_host_validation() {
+    # All three host sources must be validated before a link is printed.
+    source "${REPO_ROOT}/install.sh"
+    export LOGROTATE_DIR="${SANDBOX}/logrotate.d"
+    mkdir -p "${LOGROTATE_DIR}"
+    validate_host "203.0.113.7" || return 1
+    validate_host "example.com" || return 1
+    validate_host "sub.example.co" || return 1
+    expect_fail validate_host "bad host with spaces" || return 1
+    expect_fail validate_host "300.1.1.1" || return 1
+    expect_fail validate_host "no-dot-host" || return 1
+    expect_fail validate_host "-bad.example.com" || return 1
+
+    export XRAY_TEST_LISTEN_PORTS=""
+    # 1) env override
+    AUTO_INSTALL=1 XRAY_NODE_HOST="bad host" expect_fail node_setup || return 1
+    # 2) preserved params
+    write_node_params "PLACEHOLDER-UUID" "TESTPRIVKEYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" \
+        "TESTPUBKEYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" "aabbccdd" \
+        "bad host" "443" "sni.example" "www.apple.com:443" "vision" || return 1
+    AUTO_INSTALL=1 expect_fail node_setup || return 1
+    # 3) interactive
+    expect_fail bash -c "printf 'bad host\\n\\n\\n\\n\\n' | bash -c 'source \"${REPO_ROOT}/install.sh\"; AUTO_INSTALL=0; node_setup'" || return 1
+    # 4) a good host still passes
+    AUTO_INSTALL=1 XRAY_NODE_HOST="203.0.113.7" node_setup >/dev/null 2>&1 || return 1
+    return 0
+}
+
+t_sni_params_atomic() {
+    # If params cannot be written, the live config must not stay switched.
+    source "${REPO_ROOT}/manage.sh"
+    export XRAY_TEST_LISTEN_PORTS="443"
+    render_config "PLACEHOLDER-UUID" "PLACEHOLDER-SID" "PLACEHOLDER-PRIVATE-KEY" \
+        "old.example" "443" "vision" "old.example:443" "${XRAY_CONF}" || return 1
+    write_node_params "PLACEHOLDER-UUID" "TESTPRIVKEYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" \
+        "TESTPUBKEYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" "aabbccdd" \
+        "203.0.113.9" "443" "old.example" "old.example:443" "vision" || return 1
+    local out rc
+    out="$(printf 'yes\n' | XRAY_TEST_PARAMS_RENAME_FAIL=1 cmd_node sni new.example 2>&1)" && rc=0 || rc=$?
+    [[ "${rc}" -ne 0 ]] || return 1
+    printf '%s' "${out}" | grep -q 'node.params' || return 1
+    grep -q '"dest": "old.example:443"' "${XRAY_CONF}" || return 1
+    grep -q '^sni=old.example$' "${NODE_PARAMS_FILE}" || return 1
+    return 0
+}
+
+t_uninstall_aborts_without_snapshot() {
+    # A failed pre-uninstall snapshot must stop the uninstall, not silently
+    # destroy the only recovery path.
+    source "${REPO_ROOT}/manage.sh"
+    mkdir -p "${TOOL_INSTALL_DIR}"
+    : > "${TOOL_INSTALL_DIR}/marker"
+    local out rc
+    out="$(SNAPSHOT_PARENT=/proc/dsh-impossible cmd_uninstall --yes 2>&1 </dev/null)" && rc=0 || rc=$?
+    [[ "${rc}" -ne 0 ]] || return 1
+    printf '%s' "${out}" | grep -q 'snapshot FAILED' || return 1
+    [[ -f "${TOOL_INSTALL_DIR}/marker" ]] || return 1
+    return 0
+}
+
+t_hy2_preflight_own_port() {
+    # An upgrade runs while HY2 owns UDP 443: that must pass; another owner
+    # must still be refused.
+    source "${REPO_ROOT}/manage.sh"
+    local d="${SANDBOX}/hy2-preflight"
+    mkdir -p "${d}"
+    export HY2_CONF_DIR="${d}" HY2_MARKER="${d}/.managed-by-hy2addon"
+    : > "${HY2_MARKER}"
+    XRAY_TEST_HY2_PORT_OWNER=self hy2_preflight >/dev/null 2>&1 || return 1
+    expect_fail env XRAY_TEST_HY2_PORT_OWNER=other hy2_preflight || return 1
+    XRAY_TEST_HY2_PORT_OWNER=none hy2_preflight >/dev/null 2>&1 || return 1
+    return 0
+}
+
+
 run_test t_version
 run_test t_dgst
 run_test t_urlencode
@@ -2617,6 +2823,16 @@ run_test t_upgrade_requires_listening
 run_test t_uninstall_args
 run_test t_params_file_mode
 run_test t_install_preserve_requires_params
+run_test t_prompt_with_default
+run_test t_install_version_requires_upgrade
+run_test t_auth_requires_sshd_restart
+run_test t_manage_requires_root
+run_test t_rollback_protects_target
+run_test t_restore_dropin
+run_test t_host_validation
+run_test t_sni_params_atomic
+run_test t_uninstall_aborts_without_snapshot
+run_test t_hy2_preflight_own_port
 run_test t_hy2_snapshot_restore_verified
 run_test t_hy2_rollback_honest_failure
 run_test t_snapshot_params_roundtrip
